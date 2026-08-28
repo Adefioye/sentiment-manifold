@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import json
+import os
 from pathlib import Path
 
 from .config import ReproductionConfig
-from .data import load_toy_movie_review
+from .data import load_toy_movie_review, preprocess_sst
 from .devices import resolve_device
 from .experiment import run_reproduction
 from .models import CausalLMAdapter
@@ -24,6 +26,21 @@ def _load_with_overrides(args) -> ReproductionConfig:
     if getattr(args, "with_openwebtext", False):
         config.experiment.evaluate_openwebtext = True
     return config
+
+
+def _token_from_environment(variable_name: str) -> str | None:
+    token = os.environ.get(variable_name)
+    if token:
+        return token
+    token_path = os.environ.get("HF_TOKEN_PATH")
+    if token_path:
+        path = Path(token_path).expanduser()
+        if not path.is_file():
+            raise ValueError(f"HF_TOKEN_PATH does not point to a readable file: {path}")
+        token = path.read_text(encoding="utf-8").strip()
+        if token:
+            return token
+    return None
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -44,6 +61,36 @@ def main(argv: list[str] | None = None) -> None:
 
     plot_parser = subparsers.add_parser("plot", help="render plots from a completed run")
     plot_parser.add_argument("--run-dir", required=True)
+
+    preprocess = subparsers.add_parser(
+        "preprocess-sst",
+        help="build Pythia-1.4B-filtered SST datasets and optionally publish them",
+    )
+    preprocess.add_argument(
+        "--sst-root",
+        default="../eliciting-latent-sentiment/stanfordSentimentTreebank",
+    )
+    preprocess.add_argument("--output-dir", default="data/processed/sst-pythia-1.4b")
+    preprocess.add_argument("--device", choices=["auto", "cuda", "mps", "cpu"], default="auto")
+    preprocess.add_argument(
+        "--dtype", choices=["auto", "float32", "float16", "bfloat16"], default="auto"
+    )
+    preprocess.add_argument("--batch-size", type=int, default=16)
+    preprocess.add_argument("--revision", default=None)
+    preprocess.add_argument("--push-to-hub", action="store_true")
+    preprocess.add_argument(
+        "--hub-repo-id",
+        default=None,
+        help="defaults to <authenticated-user>/sentiment-manifold-sst-pythia-1.4b",
+    )
+    preprocess.add_argument(
+        "--hf-token-env",
+        default="HF_TOKEN",
+        help="environment variable containing the Hub token; the token is never logged",
+    )
+    visibility = preprocess.add_mutually_exclusive_group()
+    visibility.add_argument("--public", action="store_true", help="publish a public dataset")
+    visibility.add_argument("--private", action="store_true", help="publish privately (default)")
 
     args = parser.parse_args(argv)
     if args.command == "inspect-data":
@@ -75,6 +122,28 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "plot":
         for path in plot_run(args.run_dir):
             print(path)
+    elif args.command == "preprocess-sst":
+        hf_token = _token_from_environment(args.hf_token_env) if args.push_to_hub else None
+        if args.push_to_hub and not hf_token:
+            parser.error(
+                f"--push-to-hub requires a token in {args.hf_token_env!r} or HF_TOKEN_PATH"
+            )
+        result = preprocess_sst(
+            sst_root=args.sst_root,
+            output_dir=args.output_dir,
+            device=args.device,
+            dtype=args.dtype,
+            batch_size=args.batch_size,
+            revision=args.revision,
+            push_to_hub=args.push_to_hub,
+            hub_repo_id=args.hub_repo_id,
+            private=not args.public,
+            hf_token=hf_token,
+        )
+        print(f"Saved SST datasets: {result.output_dir}")
+        print(json.dumps(result.metadata["counts"], indent=2, sort_keys=True))
+        if result.hub_repo_id:
+            print(f"Published dataset: https://huggingface.co/datasets/{result.hub_repo_id}")
 
 
 if __name__ == "__main__":

@@ -5,4 +5,4 @@ __pycache__/
 .ruff_cache/
 .ipynb_checkpoints/
 outputs/
-
+data/processed/

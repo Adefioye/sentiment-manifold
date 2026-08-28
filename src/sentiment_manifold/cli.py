@@ -23,6 +23,8 @@ def _load_with_overrides(args) -> ReproductionConfig:
         config.model.device = args.device
     if getattr(args, "output_dir", None):
         config.experiment.output_dir = str(Path(args.output_dir).resolve())
+    if getattr(args, "with_openwebtext_resample_ablation", False):
+        config.experiment.openwebtext_resample_ablation = True
     if getattr(args, "with_openwebtext", False):
         config.experiment.evaluate_openwebtext = True
     return config
@@ -57,7 +59,12 @@ def main(argv: list[str] | None = None) -> None:
     reproduce.add_argument("--model", choices=["gpt2-small", "qwen-0.6b"], default=None)
     reproduce.add_argument("--device", choices=["auto", "cuda", "mps", "cpu"], default=None)
     reproduce.add_argument("--output-dir", default=None)
-    reproduce.add_argument("--with-openwebtext", action="store_true")
+    reproduce.add_argument(
+        "--with-openwebtext-resample-ablation",
+        action="store_true",
+        help="run the optional exploratory OpenWebText loss diagnostic",
+    )
+    reproduce.add_argument("--with-openwebtext", action="store_true", help=argparse.SUPPRESS)
 
     plot_parser = subparsers.add_parser("plot", help="render plots from a completed run")
     plot_parser.add_argument("--run-dir", required=True)

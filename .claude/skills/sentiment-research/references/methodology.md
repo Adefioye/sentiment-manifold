@@ -9,7 +9,9 @@
 - Use directional replacement `h' = h + d d^T(h_source - h)`.
 - Report unclipped logit-difference recovery and source-label flip rate.
 - Select each method's layer on SST validation only. Keep SST test and other OOD data locked for confirmation.
-- Use OpenWebText for LM-loss and natural-support diagnostics; it has no sentiment ground truth.
+- Reproduce the paper's OpenWebText projection/GPT-4-label analysis separately. Treat LM-loss
+  resample ablation as an optional exploratory diagnostic; it has no sentiment ground truth and
+  must not be presented as the paper's core OpenWebText evaluation.
 
 ## Claim ladder
 
@@ -24,4 +26,3 @@ Do not skip levels in prose. A direction can be decodable without being used.
 ## Manifold extension gate
 
 Require graded, neutral/mixed, or compositional states before fitting curvature. Compare every manifold against a dimension-matched linear subspace and a straight chord in the same subspace. Select using held-out reconstruction/support, causal recovery, specificity, seed stability, and complexity—not visual shape.
-

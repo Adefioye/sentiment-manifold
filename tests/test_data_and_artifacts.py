@@ -3,6 +3,7 @@ from pathlib import Path
 import numpy as np
 
 from sentiment_manifold.artifacts import DirectionArtifact
+from sentiment_manifold.config import ExperimentConfig
 from sentiment_manifold.data.toy_movie_review import load_toy_movie_review
 
 
@@ -26,3 +27,15 @@ def test_direction_artifact_round_trip(tmp_path):
     restored = DirectionArtifact.load(path)
     np.testing.assert_allclose(restored.vector, [0.6, 0.8])
     assert restored.metadata == {"score": 1.0}
+
+
+def test_resample_ablation_is_explicitly_opt_in():
+    config = ExperimentConfig()
+    assert not config.resample_ablation_enabled
+    config.openwebtext_resample_ablation = True
+    assert config.resample_ablation_enabled
+
+
+def test_legacy_openwebtext_flag_remains_compatible():
+    config = ExperimentConfig(evaluate_openwebtext=True)
+    assert config.resample_ablation_enabled

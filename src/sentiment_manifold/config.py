@@ -49,9 +49,16 @@ class ExperimentConfig:
         default_factory=lambda: ["mean_diff", "kmeans", "logistic_regression", "pca", "das"]
     )
     selection_metric: str = "sst_patch_recovery"
+    openwebtext_resample_ablation: bool = False
+    # Compatibility with configurations created before the exploratory
+    # diagnostic received its own explicit name.
     evaluate_openwebtext: bool = False
     output_dir: str = "outputs"
     resume: bool = True
+
+    @property
+    def resample_ablation_enabled(self) -> bool:
+        return self.openwebtext_resample_ablation or self.evaluate_openwebtext
 
 
 @dataclass

@@ -23,7 +23,7 @@ experiment:
   layers: [0]
   methods: [mean_diff, kmeans, logistic_regression, pca, das]
   selection_metric: sst_patch_recovery
-  evaluate_openwebtext: false
+  openwebtext_resample_ablation: false
   output_dir: outputs/smoke
   resume: true
 

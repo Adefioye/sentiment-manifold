@@ -88,7 +88,7 @@ def run_reproduction(config: ReproductionConfig) -> Path:
         raise RuntimeError("No equal-token-length SST counterfactual pairs were constructed")
 
     owt_texts = None
-    if config.experiment.evaluate_openwebtext:
+    if config.experiment.resample_ablation_enabled:
         owt_texts = load_openwebtext(
             config.data.openwebtext_dataset,
             config.data.openwebtext_split,

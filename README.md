@@ -2,7 +2,7 @@
 
 A standalone, reusable reproduction of the essential sentiment-direction experiments from Tigges et al., *Language Models Linearly Represent Sentiment*.
 
-The implemented baseline fits five directions—mean difference, K-means, logistic regression, PCA, and one-dimensional DAS—at every residual-stream layer of GPT-2 Small and Qwen3-0.6B. It evaluates ToyMovieReview generalization, paired causal recovery on SST, direction similarity, and OpenWebText language-model loss under directional resample ablation.
+The implemented baseline fits five directions—mean difference, K-means, logistic regression, PCA, and one-dimensional DAS—at every residual-stream layer of GPT-2 Small and Qwen3-0.6B. It evaluates ToyMovieReview generalization, paired causal recovery on SST, and direction similarity. OpenWebText language-model loss under directional resample ablation is available as an optional exploratory diagnostic.
 
 ## Quick start
 
@@ -64,7 +64,26 @@ candidate_pool = load_dataset(
 )
 ```
 
-The default configuration fits every layer but leaves the expensive OpenWebText sweep disabled. For a smoke run, reduce `experiment.layers`, `das.epochs`, and the SST pair limit; enable OpenWebText only for the frozen confirmation run. See [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) and [docs/REPRODUCTION.md](docs/REPRODUCTION.md).
+## Optional OpenWebText resample ablation
+
+Resample ablation is disabled by default and is not required for reproducing the paper's principal OpenWebText result. It shuffles the scalar projection onto a fitted sentiment direction between unrelated OpenWebText examples, preserves each activation's orthogonal component, and reports the resulting language-model loss increase. Random directions provide matched controls.
+
+Enable this exploratory diagnostic explicitly:
+
+```bash
+sentiment-manifold reproduce --config configs/reproduction.yaml --model gpt2-small --with-openwebtext-resample-ablation
+```
+
+The equivalent configuration is:
+
+```yaml
+experiment:
+  openwebtext_resample_ablation: true
+```
+
+It is expensive because it evaluates every selected layer and fitting method, followed by the configured random-direction controls. Keep it disabled for smoke runs. The paper's OpenWebText evaluation instead studies first-layer sentiment projections using GPT-4-labelled tokens; that correlational evaluation should be reported separately from this optional loss diagnostic.
+
+The default configuration fits every layer with resample ablation disabled. For a smoke run, reduce `experiment.layers`, `das.epochs`, and the SST pair limit. See [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) and [docs/REPRODUCTION.md](docs/REPRODUCTION.md).
 
 ## Reproducibility boundary
 

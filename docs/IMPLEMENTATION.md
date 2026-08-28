@@ -17,7 +17,9 @@ The experiment runner fits every configured method at every configured boundary 
 - ToyMovieReview held-out projection accuracy, patching recovery, and flip rate;
 - SST final-position projection accuracy and all-token paired patching recovery/flip rate;
 - within-layer absolute cosine similarity among all five directions;
-- optional OpenWebText baseline loss, resample-ablated loss, loss increase, and four matched random-direction controls;
+- optional exploratory OpenWebText baseline loss, resample-ablated loss, loss increase, and four
+  matched random-direction controls, enabled only by
+  `experiment.openwebtext_resample_ablation` or `--with-openwebtext-resample-ablation`;
 - one best SST-validation layer per method.
 
 ## Package map

@@ -1,0 +1,31 @@
+template: "I thought this movie was {adjective}, I {verb} it.\nConclusion: This movie is"
+answers:
+  positive: " good"
+  negative: " bad"
+train:
+  positive_adjectives:
+    [adequate, amazing, awesome, beautiful, brilliant, charming, cheerful, decent,
+     delightful, excellent, exceptional, fabulous, fantastic, good, great,
+     incredible, lovely, nice, outstanding, perfect, pleasant, positive, remarkable,
+     satisfactory, satisfying, splendid, spectacular, superb, terrific, wonderful]
+  negative_adjectives:
+    [annoying, awful, bad, boring, depressing, disastrous, disgusting, dire, dreadful,
+     dull, frustrating, horrific, horrible, inadequate, inferior, miserable, nasty,
+     offensive, disappointing, terrible, tragic, ugly, unpleasant, wretched]
+test:
+  positive_adjectives:
+    [admirable, glorious, helpful, impressive, lively, magical, modern, phenomenal,
+     pleasing, radiant, crisp, strong, stunning, sweet, vivid, warm]
+  negative_adjectives:
+    [ancient, appalling, bitter, dismal, flat, foul, grim, lazy, noisy, poor, rough,
+     rotten, sour, vile]
+verbs:
+  positive:
+    [adored, admired, appreciated, applauded, approved, cherished, commended,
+     congratulated, embraced, endorsed, enjoyed, exalted, favored, glorified, liked,
+     loved, praised, relished, respected, savored, treasured, valued, welcomed]
+  negative:
+    [abhorred, abominated, condemned, criticized, denounced, detested, disdained,
+     disliked, disparaged, disrespected, execrated, hated, loathed, reviled, scorned,
+     shunned, spurned, vilified]
+

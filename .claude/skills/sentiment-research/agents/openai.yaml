@@ -1,0 +1,4 @@
+interface:
+  display_name: "Sentiment Research"
+  short_description: "Plan and run causal sentiment experiments"
+  default_prompt: "Use $sentiment-research to plan and implement a reproducible sentiment-direction experiment."

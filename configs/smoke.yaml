@@ -1,0 +1,35 @@
+seed: 0
+
+model:
+  name: gpt2-small
+  revision: null
+  device: cpu
+  dtype: float32
+  batch_size: 16
+
+data:
+  toy_config: data/toy_movie_review.yaml
+  sst_root: ../eliciting-latent-sentiment/stanfordSentimentTreebank
+  sst_split: dev
+  sst_max_examples: 32
+  sst_max_pairs: 2
+  openwebtext_dataset: stas/openwebtext-10k
+  openwebtext_split: train
+  openwebtext_max_samples: 8
+  openwebtext_sequence_length: 32
+  openwebtext_random_seeds: [1]
+
+experiment:
+  layers: [0]
+  methods: [mean_diff, kmeans, logistic_regression, pca, das]
+  selection_metric: sst_patch_recovery
+  evaluate_openwebtext: false
+  output_dir: outputs/smoke
+  resume: true
+
+das:
+  epochs: 1
+  learning_rate: 0.001
+  weight_decay: 0.0
+  batch_size: 16
+  max_grad_norm: 1.0

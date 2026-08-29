@@ -2,7 +2,8 @@ seed: 0
 
 model:
   name: gpt2-small
-  revision: null
+  revision: 607a30d783dfa663caf39e06633721c8d4cfcd7e
+  prepend_bos: true
   device: cpu
   dtype: float32
   batch_size: 16
@@ -33,3 +34,4 @@ das:
   weight_decay: 0.0
   batch_size: 16
   max_grad_norm: 1.0
+  implementation: tigges_rotation

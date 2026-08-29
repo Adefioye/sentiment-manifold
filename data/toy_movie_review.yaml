@@ -1,7 +1,7 @@
-template: "I thought this movie was {adjective}, I {verb} it.\nConclusion: This movie is"
+template: "I thought this movie was {adjective}, I {verb} it. \nConclusion: This movie is"
 answers:
-  positive: " good"
-  negative: " bad"
+  positive: [" great", " amazing", " awesome", " good", " perfect"]
+  negative: [" terrible", " awful", " bad", " horrible", " disgusting"]
 train:
   positive_adjectives:
     [adequate, amazing, awesome, beautiful, brilliant, charming, cheerful, decent,
@@ -28,4 +28,3 @@ verbs:
     [abhorred, abominated, condemned, criticized, denounced, detested, disdained,
      disliked, disparaged, disrespected, execrated, hated, loathed, reviled, scorned,
      shunned, spurned, vilified]
-

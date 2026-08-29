@@ -39,3 +39,59 @@ The corresponding `*_sign_flip_percent` column is the literal pre/post sign-chan
 identical on a paper-parity dataset. Normalized columns remain available for model selection. Per-pair
 raw clean/corrupted/patched logit differences and sign-flip indicators are recorded in
 `patching_records.csv` for auditing.
+
+## Saved run artifacts
+
+Every completed experiment writes analysis-ready artifacts under the configured output directory.
+Files are updated incrementally while a run proceeds, so an interrupted run still retains completed
+cells:
+
+- `resolved_config.json`: requested configuration plus resolved model/tokenizer revisions, BOS and
+  padding settings, device, dtype, and library versions;
+- `prompt_manifest.csv`: exact ToyMovieReview text, Python representation, UTF-8 bytes, SHA-256,
+  token IDs, token count, and adjective focus position;
+- `toy_vocabulary.csv`: every source adjective/verb, tokenizer IDs, and one-token retention decision;
+- `answer_tokens.csv`: Tigges's five aligned ToyMovieReview answer pairs and SST continuation labels;
+- `pair_manifest.csv`: exact Toy train/test and SST clean/corrupted IDs, prompt hashes, token IDs,
+  labels, and equal-length checks;
+- `direction_metadata.csv`: artifact path, dimensionality, and orientation convention;
+- `das_losses.csv`: one friendly row per method/layer/epoch with train and evaluation loss (present
+  when a DAS method is run);
+- `patching_records.csv`: per-pair clean, corrupted, and patched logit differences, margins,
+  recovery, and literal flip indicator;
+- `metrics.csv`: per-method/layer aggregate projection and causal metrics;
+- `direction_similarities.csv`: one-dimensional absolute cosine similarities;
+- `best_layers.csv`: validation-selected layer for each method;
+- `openwebtext_controls.csv`: optional random controls when the exploratory resample ablation runs;
+- `directions/*.npz`: normalized 1D vectors or orthonormal DAS subspace bases with full metadata.
+
+`sentiment-manifold plot` consumes these saved CSVs and writes the causal layer curves, DAS loss
+curves, and direction-similarity heatmaps under `figures/`; it does not rerun an experiment.
+
+## Reference-code parity now enforced
+
+- the GPT-2 model/tokenizer commit is pinned and its resolved revisions are saved;
+- tokenization explicitly prepends BOS, matching TransformerLens `prepend_bos=True`;
+- ToyMovieReview uses the reference prompt bytes and its five positive/negative answers;
+- tokenizer filtering is recorded rather than silently changing the prompt vocabulary;
+- clean/corrupted terminology and the reference cyclic prompt shift are used;
+- directional patching edits every token position (`placeholders = ['ALL']` upstream);
+- K-means uses `n_init=10`, logistic regression uses `max_iter=1000`, and PCA's arbitrary raw sign is
+  recorded before the exported axis is oriented for stable reporting;
+- DAS uses an orthogonally parameterized rotation, normalized logit-difference objective, 64 epochs,
+  and configured 1D/2D/3D variants;
+- the random direction control follows the upstream seed-42, layer-indexed sequence.
+
+Known parity boundaries remain and must not be hidden in reporting:
+
+- the runner uses Hugging Face hooks rather than TransformerLens;
+- it consumes all 54 verifiable training adjectives from `prompts.yaml`, whereas the current
+  upstream `SIMPLE_TRAIN` implementation computes its prompt count from the smaller core lists
+  before loading the training lists; this appears inconsistent with the paper's stated 55/30 split;
+- SST equal-length pairs are reconstructed deterministically from the source files instead of
+  loading an upstream shuffled pickle, so pair identities can differ even when the task definition
+  and aggregate metric agree.
+
+These are why hook boundary, prompt/token manifest, paired IDs, and metric comparisons remain
+required before claiming exact numerical reproduction. The output artifacts make each difference
+auditable rather than silently changing the paper methodology.

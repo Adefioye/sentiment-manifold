@@ -43,11 +43,19 @@ class PatchingResult:
         return 100.0 * self.sign_flip_rate
 
 
-def _logit_differences(logits: Tensor, answer_ids: dict[int, int]) -> Tensor:
+def _logit_differences(logits: Tensor, answer_ids: dict[int, int | Tensor]) -> Tensor:
     """Return the paper's positive-minus-negative next-token logit difference."""
-    positive = logits[:, answer_ids[1]]
-    negative = logits[:, answer_ids[0]]
-    return positive - negative
+    positive_ids = torch.as_tensor(answer_ids[1], device=logits.device, dtype=torch.long).reshape(
+        -1
+    )
+    negative_ids = torch.as_tensor(answer_ids[0], device=logits.device, dtype=torch.long).reshape(
+        -1
+    )
+    if len(positive_ids) != len(negative_ids):
+        raise ValueError("Positive and negative answers must form aligned pairs")
+    positive = logits.index_select(-1, positive_ids)
+    negative = logits.index_select(-1, negative_ids)
+    return (positive - negative).mean(dim=-1)
 
 
 def _target_signed_margins(logit_differences: Tensor, target_labels: Tensor) -> Tensor:
@@ -62,9 +70,7 @@ def _target_signed_margins(logit_differences: Tensor, target_labels: Tensor) -> 
     return torch.where(target_labels == 1, logit_differences, -logit_differences)
 
 
-def _centered_target_signed_margins(
-    logit_differences: Tensor, target_labels: Tensor
-) -> Tensor:
+def _centered_target_signed_margins(logit_differences: Tensor, target_labels: Tensor) -> Tensor:
     """Match Tigges's binary-classifier bias centering before flip accuracy."""
     centered = logit_differences - logit_differences.mean()
     return _target_signed_margins(centered, target_labels)
@@ -87,14 +93,22 @@ def evaluate_directional_patching(
     direction: np.ndarray,
     *,
     layer: int,
-    answers: dict[int, str],
+    answers: dict[int, tuple[str, ...] | list[str]],
     position: str,
     batch_size: int = 16,
 ) -> PatchingResult:
     if not pairs:
         raise ValueError("Directional patching requires non-empty pairs")
     vector = torch.as_tensor(direction, device=adapter.device_spec.device, dtype=torch.float32)
-    answer_ids = {label: adapter.single_token_id(answer) for label, answer in answers.items()}
+    answer_ids = {
+        label: torch.tensor(
+            [adapter.single_token_id(answer) for answer in values],
+            device=adapter.device_spec.device,
+        )
+        for label, values in answers.items()
+    }
+    if len(answer_ids[0]) != len(answer_ids[1]) or not len(answer_ids[0]):
+        raise ValueError("Positive and negative answers must form non-empty aligned pairs")
     corrupted_margins: list[Tensor] = []
     clean_margins: list[Tensor] = []
     patched_margins: list[Tensor] = []
@@ -186,11 +200,15 @@ def evaluate_directional_patching(
         corrupted_margins.append(batch_corrupted_margins)
         clean_margins.append(batch_clean_margins)
         patched_margins.append(batch_patched_margins)
-        batch_flips = _target_directed_logit_flips(
-            batch_corrupted_logit_differences,
-            batch_patched_logit_differences,
-            target_labels,
-        ).float().cpu()
+        batch_flips = (
+            _target_directed_logit_flips(
+                batch_corrupted_logit_differences,
+                batch_patched_logit_differences,
+                target_labels,
+            )
+            .float()
+            .cpu()
+        )
         flips.append(batch_flips)
         for index, pair in enumerate(selected):
             corrupted_value = float(batch_corrupted_margins[index])

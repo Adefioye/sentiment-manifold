@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from dataclasses import dataclass
+from importlib.metadata import version
 from typing import Callable, Iterator, Sequence
 
 import numpy as np
@@ -34,11 +35,22 @@ class TokenizedBatch:
 class CausalLMAdapter:
     """Expose layer boundaries 0..n_layers for GPT-2 and Qwen-style models."""
 
-    def __init__(self, model, tokenizer, model_name: str, device_spec: DeviceSpec) -> None:
+    def __init__(
+        self,
+        model,
+        tokenizer,
+        model_name: str,
+        device_spec: DeviceSpec,
+        *,
+        revision: str | None,
+        prepend_bos: bool,
+    ) -> None:
         self.model = model
         self.tokenizer = tokenizer
         self.model_name = model_name
         self.device_spec = device_spec
+        self.requested_revision = revision
+        self.prepend_bos = prepend_bos
         self.blocks, self.final_norm = self._find_transformer_parts(model)
         self.n_layers = len(self.blocks)
         self.hidden_size = int(model.config.hidden_size)
@@ -50,6 +62,7 @@ class CausalLMAdapter:
         device_spec: DeviceSpec,
         *,
         revision: str | None = None,
+        prepend_bos: bool = True,
     ) -> "CausalLMAdapter":
         tokenizer = AutoTokenizer.from_pretrained(model_name, revision=revision, use_fast=True)
         if tokenizer.pad_token_id is None:
@@ -62,7 +75,39 @@ class CausalLMAdapter:
         ).to(device_spec.device)
         model.eval()
         model.requires_grad_(False)
-        return cls(model, tokenizer, model_name, device_spec)
+        if prepend_bos and tokenizer.bos_token_id is None:
+            raise ValueError(f"{model_name} has no BOS token but prepend_bos=True")
+        return cls(
+            model,
+            tokenizer,
+            model_name,
+            device_spec,
+            revision=revision,
+            prepend_bos=prepend_bos,
+        )
+
+    def provenance(self) -> dict[str, object]:
+        resolved_tokenizer_revision = self.tokenizer.init_kwargs.get("_commit_hash")
+        if resolved_tokenizer_revision is None and self.requested_revision is not None:
+            # The tokenizer was loaded with this immutable revision even when a
+            # Transformers version does not copy the commit into init_kwargs.
+            resolved_tokenizer_revision = self.requested_revision
+        return {
+            "model_name": self.model_name,
+            "requested_revision": self.requested_revision,
+            "resolved_model_revision": getattr(self.model.config, "_commit_hash", None),
+            "resolved_tokenizer_revision": resolved_tokenizer_revision,
+            "tokenizer_class": type(self.tokenizer).__name__,
+            "tokenizer_vocab_size": len(self.tokenizer),
+            "prepend_bos": self.prepend_bos,
+            "bos_token_id": self.tokenizer.bos_token_id,
+            "pad_token_id": self.tokenizer.pad_token_id,
+            "padding_side": self.tokenizer.padding_side,
+            "device": str(self.device_spec.device),
+            "dtype": str(self.device_spec.dtype),
+            "torch_version": torch.__version__,
+            "transformers_version": version("transformers"),
+        }
 
     @staticmethod
     def _find_transformer_parts(model):
@@ -80,10 +125,23 @@ class CausalLMAdapter:
             texts,
             padding=True,
             return_tensors="pt",
-            add_special_tokens=True,
+            add_special_tokens=not self.prepend_bos,
             return_offsets_mapping=True,
         )
         offsets = encoded.pop("offset_mapping")
+        if self.prepend_bos:
+            bos = torch.full(
+                (encoded["input_ids"].shape[0], 1),
+                int(self.tokenizer.bos_token_id),
+                dtype=encoded["input_ids"].dtype,
+            )
+            encoded["input_ids"] = torch.cat((bos, encoded["input_ids"]), dim=1)
+            encoded["attention_mask"] = torch.cat(
+                (torch.ones_like(bos), encoded["attention_mask"]), dim=1
+            )
+            offsets = torch.cat(
+                (torch.zeros((offsets.shape[0], 1, 2), dtype=offsets.dtype), offsets), dim=1
+            )
         focus_positions: Tensor | None = None
         if examples and isinstance(examples[0], TextExample):
             positions = []
@@ -201,7 +259,7 @@ class CausalLMAdapter:
         batch = self.tokenize([example])
         encoded = self.tokenizer(
             example.text,
-            add_special_tokens=True,
+            add_special_tokens=False,
             return_offsets_mapping=True,
         )
         overlaps = [

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import torch
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from sklearn.linear_model import LogisticRegression
@@ -16,13 +17,17 @@ class MeanDifferenceFitter(DirectionFitter):
     def fit(self, activations: FloatArray, labels: IntArray) -> FitResult:
         x, y = self.validate(activations, labels)
         direction = x[y == 1].mean(axis=0) - x[y == 0].mean(axis=0)
-        return FitResult(self.name, direction, {"n_samples": len(x)})
+        return FitResult(
+            self.name,
+            direction,
+            {"n_samples": len(x), **self.orientation_diagnostics(direction, x, y)},
+        )
 
 
 class KMeansFitter(DirectionFitter):
     name = "kmeans"
 
-    def __init__(self, *, random_state: int = 0, n_init: int = 20) -> None:
+    def __init__(self, *, random_state: int = 0, n_init: int = 10) -> None:
         self.random_state = random_state
         self.n_init = n_init
 
@@ -39,16 +44,22 @@ class KMeansFitter(DirectionFitter):
         return FitResult(
             self.name,
             direction,
-            {"train_accuracy": float((predicted == y).mean()), "inertia": float(model.inertia_)},
+            {
+                "train_accuracy": float((predicted == y).mean()),
+                "inertia": float(model.inertia_),
+                "n_init": self.n_init,
+                **self.orientation_diagnostics(direction, x, y),
+            },
         )
 
 
 class LogisticRegressionFitter(DirectionFitter):
     name = "logistic_regression"
 
-    def __init__(self, *, random_state: int = 0, max_iter: int = 2000) -> None:
+    def __init__(self, *, random_state: int = 0, max_iter: int = 1000, tol: float = 1e-4) -> None:
         self.random_state = random_state
         self.max_iter = max_iter
+        self.tol = tol
 
     def fit(self, activations: FloatArray, labels: IntArray) -> FitResult:
         x, y = self.validate(activations, labels)
@@ -56,11 +67,20 @@ class LogisticRegressionFitter(DirectionFitter):
             solver="liblinear",
             random_state=self.random_state,
             max_iter=self.max_iter,
+            tol=self.tol,
         ).fit(x, y)
+        direction = model.coef_[0]
         return FitResult(
             self.name,
-            model.coef_[0],
-            {"train_accuracy": float(model.score(x, y)), "intercept": float(model.intercept_[0])},
+            direction,
+            {
+                "train_accuracy": float(model.score(x, y)),
+                "intercept": float(model.intercept_[0]),
+                "solver": "liblinear",
+                "max_iter": self.max_iter,
+                "tol": self.tol,
+                **self.orientation_diagnostics(direction, x, y),
+            },
         )
 
 
@@ -70,9 +90,41 @@ class PCAFitter(DirectionFitter):
     def fit(self, activations: FloatArray, labels: IntArray) -> FitResult:
         x, y = self.validate(activations, labels)
         model = PCA(n_components=1).fit(x)
-        direction = self.orient(model.components_[0], x, y)
+        raw_direction = model.components_[0]
+        direction = self.orient(raw_direction, x, y)
         return FitResult(
             self.name,
             direction,
-            {"explained_variance_ratio": float(model.explained_variance_ratio_[0])},
+            {
+                "explained_variance_ratio": float(model.explained_variance_ratio_[0]),
+                "upstream_raw_sign_is_arbitrary": True,
+                **self.orientation_diagnostics(raw_direction, x, y),
+            },
+        )
+
+
+class RandomDirectionFitter(DirectionFitter):
+    """Tigges's layer-indexed unit-Gaussian random control (global seed 42)."""
+
+    name = "random"
+
+    def __init__(self, *, layer: int, seed: int = 42) -> None:
+        self.layer = layer
+        self.seed = seed
+
+    def fit(self, activations: FloatArray, labels: IntArray) -> FitResult:
+        x, y = self.validate(activations, labels)
+        generator = torch.Generator(device="cpu").manual_seed(self.seed)
+        direction = None
+        for _ in range(self.layer + 1):
+            direction = torch.randn(x.shape[1], generator=generator).numpy()
+        assert direction is not None
+        return FitResult(
+            self.name,
+            direction,
+            {
+                "random_seed": self.seed,
+                "random_sequence_index": self.layer,
+                "orientation_convention": "unoriented_random_control",
+            },
         )

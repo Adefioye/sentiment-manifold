@@ -19,11 +19,19 @@ class DirectionArtifact:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        vector = np.asarray(self.vector, dtype=np.float32).reshape(-1)
-        norm = float(np.linalg.norm(vector))
-        if not np.isfinite(norm) or norm <= 1e-12:
-            raise ValueError("Direction must have finite non-zero norm")
-        self.vector = vector / norm
+        vector = np.asarray(self.vector, dtype=np.float32)
+        if vector.ndim == 1:
+            norm = float(np.linalg.norm(vector))
+            if not np.isfinite(norm) or norm <= 1e-12:
+                raise ValueError("Direction must have finite non-zero norm")
+            self.vector = vector / norm
+            return
+        if vector.ndim != 2 or vector.shape[1] < 1 or not np.isfinite(vector).all():
+            raise ValueError("Subspace must have finite shape [d_model, d_subspace]")
+        q, r = np.linalg.qr(vector)
+        signs = np.where(np.diag(r) < 0, -1.0, 1.0)
+        self.vector = (q[:, : vector.shape[1]] * signs).astype(np.float32)
+        self.metadata.setdefault("subspace_dimension", int(vector.shape[1]))
 
     def save(self, path: str | Path) -> Path:
         path = Path(path)

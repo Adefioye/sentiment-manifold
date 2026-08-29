@@ -21,11 +21,20 @@ class FitResult:
     diagnostics: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        direction = np.asarray(self.direction, dtype=np.float32).reshape(-1)
-        norm = float(np.linalg.norm(direction))
-        if not np.isfinite(norm) or norm <= 1e-12:
-            raise ValueError(f"{self.method} produced a zero or non-finite direction")
-        self.direction = direction / norm
+        direction = np.asarray(self.direction, dtype=np.float32)
+        if direction.ndim == 1:
+            norm = float(np.linalg.norm(direction))
+            if not np.isfinite(norm) or norm <= 1e-12:
+                raise ValueError(f"{self.method} produced a zero or non-finite direction")
+            self.direction = direction / norm
+            return
+        if direction.ndim != 2 or direction.shape[1] < 1:
+            raise ValueError("Directions must have shape [d_model] or [d_model, d_subspace]")
+        if not np.isfinite(direction).all():
+            raise ValueError(f"{self.method} produced a non-finite subspace")
+        q, r = np.linalg.qr(direction)
+        signs = np.where(np.diag(r) < 0, -1.0, 1.0)
+        self.direction = (q[:, : direction.shape[1]] * signs).astype(np.float32)
 
 
 class DirectionFitter(ABC):
@@ -54,3 +63,17 @@ class DirectionFitter(ABC):
         positive = activations[labels == 1].mean(axis=0)
         negative = activations[labels == 0].mean(axis=0)
         return direction if np.dot(direction, positive - negative) >= 0 else -direction
+
+    @staticmethod
+    def orientation_diagnostics(
+        raw_direction: FloatArray, activations: FloatArray, labels: IntArray
+    ) -> dict[str, Any]:
+        positive = activations[labels == 1].mean(axis=0)
+        negative = activations[labels == 0].mean(axis=0)
+        dot = float(np.dot(raw_direction, positive - negative))
+        return {
+            "orientation_convention": "negative_to_positive",
+            "orientation_reference": "toy_train_class_mean_difference",
+            "raw_orientation_dot": dot,
+            "orientation_sign_flipped": bool(dot < 0),
+        }

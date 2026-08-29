@@ -23,13 +23,25 @@ class OpenWebTextResult:
 def _token_batches(
     adapter: CausalLMAdapter, texts: list[str], sequence_length: int, batch_size: int
 ):
+    content_length = sequence_length - 1 if adapter.prepend_bos else sequence_length
     encoded = adapter.tokenizer(
         texts,
         truncation=True,
-        max_length=sequence_length,
+        max_length=content_length,
         padding="max_length",
+        add_special_tokens=not adapter.prepend_bos,
         return_tensors="pt",
     )
+    if adapter.prepend_bos:
+        bos = torch.full(
+            (encoded["input_ids"].shape[0], 1),
+            int(adapter.tokenizer.bos_token_id),
+            dtype=encoded["input_ids"].dtype,
+        )
+        encoded["input_ids"] = torch.cat((bos, encoded["input_ids"]), dim=1)
+        encoded["attention_mask"] = torch.cat(
+            (torch.ones_like(bos), encoded["attention_mask"]), dim=1
+        )
     for start in range(0, len(texts), batch_size):
         yield {
             key: value[start : start + batch_size].to(adapter.device_spec.device)

@@ -2,7 +2,7 @@
 
 A standalone, reusable reproduction of the essential sentiment-direction experiments from Tigges et al., *Language Models Linearly Represent Sentiment*.
 
-The implemented baseline fits five directions—mean difference, K-means, logistic regression, PCA, and one-dimensional DAS—at every residual-stream layer of GPT-2 Small and Qwen3-0.6B. It evaluates ToyMovieReview generalization, paired causal recovery on SST, and direction similarity. OpenWebText language-model loss under directional resample ablation is available as an optional exploratory diagnostic.
+The implemented baseline fits Tigges's mean-difference, K-means, logistic-regression, PCA, 1D/2D/3D DAS, and random controls at every residual-stream layer of GPT-2 Small and Qwen3-0.6B. It evaluates ToyMovieReview generalization, paired causal recovery on SST, and direction similarity. OpenWebText language-model loss under directional resample ablation is available as an optional exploratory diagnostic.
 
 ## Quick start
 
@@ -87,4 +87,4 @@ The default configuration fits every layer with resample ablation disabled. For 
 
 ## Reproducibility boundary
 
-The ToyMovieReview vocabulary and prompt match the MIT-licensed reference repository in `../eliciting-latent-sentiment`. SST is read from that checkout by default without duplicating the dataset. The new package uses Hugging Face model hooks rather than the bundled historical TransformerLens fork so GPT-2 and Qwen share the same API. Exact paper-number claims require the pinned legacy GPT-2 run described in the reproduction guide.
+The ToyMovieReview vocabulary, prompt bytes, answer pairs, BOS convention, cyclic clean/corrupted pairing, all-position patching, and causal metrics match the MIT-licensed reference repository in `../eliciting-latent-sentiment`. SST is read from that checkout by default without duplicating the dataset. The package uses Hugging Face hooks rather than the historical TransformerLens backend, so exact paper-number claims still require the parity checks described in the reproduction guide.

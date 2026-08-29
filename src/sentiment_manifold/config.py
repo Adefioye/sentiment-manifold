@@ -19,6 +19,7 @@ MODEL_ALIASES = {
 class ModelConfig:
     name: str = "gpt2-small"
     revision: str | None = None
+    prepend_bos: bool = True
     device: str = "auto"
     dtype: str = "auto"
     batch_size: int = 16
@@ -46,7 +47,16 @@ class DataConfig:
 class ExperimentConfig:
     layers: str | list[int] = "all"
     methods: list[str] = field(
-        default_factory=lambda: ["mean_diff", "kmeans", "logistic_regression", "pca", "das"]
+        default_factory=lambda: [
+            "mean_diff",
+            "kmeans",
+            "logistic_regression",
+            "pca",
+            "das",
+            "das2d",
+            "das3d",
+            "random",
+        ]
     )
     selection_metric: str = "sst_patch_recovery"
     openwebtext_resample_ablation: bool = False
@@ -63,11 +73,12 @@ class ExperimentConfig:
 
 @dataclass
 class DASConfig:
-    epochs: int = 32
+    epochs: int = 64
     learning_rate: float = 1e-3
     weight_decay: float = 0.0
     batch_size: int = 16
     max_grad_norm: float = 1.0
+    implementation: str = "tigges_rotation"
 
 
 @dataclass

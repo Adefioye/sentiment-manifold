@@ -18,6 +18,8 @@ from .plotting import plot_run
 def _load_with_overrides(args) -> ReproductionConfig:
     config = ReproductionConfig.load(args.config)
     if getattr(args, "model", None):
+        if config.model.name != args.model:
+            config.model.revision = None
         config.model.name = args.model
     if getattr(args, "device", None):
         config.model.device = args.device
@@ -112,17 +114,23 @@ def main(argv: list[str] | None = None) -> None:
                 config.model.hub_name,
                 resolve_device(config.model.device, config.model.dtype),
                 revision=config.model.revision,
+                prepend_bos=config.model.prepend_bos,
             )
-            for split, examples in (("train", toy.train), ("test", toy.test)):
-                retained = sum(adapter.focus_is_single_token(example) for example in examples)
+            filtered_toy = toy.tokenizer_filtered(adapter.tokenizer)
+            for split, examples, filtered_examples in (
+                ("train", toy.train, filtered_toy.train),
+                ("test", toy.test, filtered_toy.test),
+            ):
                 print(
-                    f"{split}: tokenizer retained {retained}/{len(examples)} one-token adjectives"
+                    f"{split}: tokenizer retained {len(filtered_examples)}/{len(examples)} "
+                    "one-token adjectives with tokenizer-filtered verbs"
                 )
             answer_ids = {
-                label: adapter.tokenizer(answer, add_special_tokens=False)["input_ids"]
-                for label, answer in toy.answers.items()
+                label: [adapter.single_token_id(answer) for answer in answers]
+                for label, answers in filtered_toy.answers.items()
             }
             print(f"answer token ids: {answer_ids}")
+            print(f"runtime provenance: {json.dumps(adapter.provenance(), sort_keys=True)}")
     elif args.command == "reproduce":
         run_dir = run_reproduction(_load_with_overrides(args))
         print(f"Completed run: {run_dir}")

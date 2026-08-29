@@ -33,9 +33,11 @@ class ModelConfig:
 class DataConfig:
     toy_config: str = "data/toy_movie_review.yaml"
     sst_root: str = "../eliciting-latent-sentiment/stanfordSentimentTreebank"
-    sst_split: str = "dev"
+    sst_processed_dir: str = "data/processed/sst-pythia-1.4b"
+    sst_dataset_config: str = "tigges_pythia_correct"
+    sst_split: str = "test"
     sst_max_examples: int | None = None
-    sst_max_pairs: int | None = 128
+    sst_max_pairs: int | None = None
     openwebtext_dataset: str = "stas/openwebtext-10k"
     openwebtext_split: str = "train"
     openwebtext_max_samples: int = 128
@@ -108,7 +110,7 @@ class ReproductionConfig:
         return cfg
 
     def _resolve_paths(self, project_root: Path) -> None:
-        for attribute in ("toy_config", "sst_root"):
+        for attribute in ("toy_config", "sst_root", "sst_processed_dir"):
             value = Path(getattr(self.data, attribute))
             if not value.is_absolute():
                 setattr(self.data, attribute, str((project_root / value).resolve()))

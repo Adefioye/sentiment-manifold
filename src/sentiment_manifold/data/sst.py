@@ -7,6 +7,8 @@ from collections import defaultdict
 from pathlib import Path
 import random
 
+from datasets import DatasetDict, load_from_disk
+
 from ..types import CounterfactualPair, TextExample
 
 
@@ -113,3 +115,59 @@ def pair_sst_by_token_length(
             if max_pairs is not None and len(pairs) >= 2 * max_pairs:
                 return pairs[: 2 * max_pairs]
     return pairs
+
+
+def load_processed_sst_candidates(
+    processed_dir: str | Path,
+    *,
+    config_name: str = "tigges_pythia_correct",
+    split: str = "test",
+) -> list[TextExample]:
+    """Load a saved, Pythia-correct SST candidate configuration for evaluation."""
+    config_path = Path(processed_dir) / config_name
+    if not config_path.exists():
+        raise FileNotFoundError(
+            f"Processed SST configuration does not exist: {config_path}. Run "
+            "`sentiment-manifold preprocess-sst` before reproduction."
+        )
+    loaded = load_from_disk(str(config_path))
+    if isinstance(loaded, DatasetDict):
+        if split not in loaded:
+            raise ValueError(
+                f"Processed SST configuration {config_name!r} has no {split!r} split"
+            )
+        dataset = loaded[split]
+    else:
+        dataset = loaded
+
+    examples: list[TextExample] = []
+    for row in dataset:
+        if row.get("split", split) != split:
+            continue
+        if "pythia_correct" not in row or not bool(row["pythia_correct"]):
+            raise ValueError(
+                f"SST evaluation requires a Pythia-correct config; invalid row "
+                f"{row.get('example_id')!r}"
+            )
+        prompt = row.get("prompt")
+        if not prompt:
+            raise ValueError(f"Processed SST row {row.get('example_id')!r} has no prompt")
+        examples.append(
+            TextExample(
+                text=str(prompt),
+                label=int(row["label"]),
+                example_id=str(row["example_id"]),
+                metadata={
+                    "sentence": row["text"],
+                    "score": float(row["sentiment_score"]),
+                    "split": split,
+                    "binarization_method": row.get("binarization_method"),
+                    "pythia_correct": True,
+                    "pythia_raw_num_tokens": row.get("pythia_raw_num_tokens"),
+                    "pythia_prompt_num_tokens": row.get("pythia_prompt_num_tokens"),
+                },
+            )
+        )
+    if not examples:
+        raise RuntimeError(f"Processed SST configuration {config_name!r} has no usable rows")
+    return examples

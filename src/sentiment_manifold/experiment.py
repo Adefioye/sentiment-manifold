@@ -15,7 +15,12 @@ from tqdm.auto import tqdm
 
 from .artifacts import DirectionArtifact, artifact_path
 from .config import ReproductionConfig
-from .data import load_openwebtext, load_sst, load_toy_movie_review, pair_sst_by_token_length
+from .data import (
+    load_openwebtext,
+    load_processed_sst_candidates,
+    load_toy_movie_review,
+    pair_sst_by_token_length,
+)
 from .devices import clear_device_cache, resolve_device
 from .directions import create_fitter
 from .directions.das import DASFitter, DASTrainingConfig
@@ -29,7 +34,7 @@ from .evaluation.projections import projection_threshold
 from .models import CausalLMAdapter
 
 
-SST_CONTINUATION_ANSWERS = {1: (" good",), 0: (" bad",)}
+SST_CLASSIFICATION_ANSWERS = {1: (" Positive",), 0: (" Negative",)}
 ARTIFACT_SCHEMA_VERSION = 3
 
 
@@ -79,7 +84,7 @@ def _answer_manifest_rows(adapter: CausalLMAdapter, toy_answers) -> list[dict]:
     rows: list[dict] = []
     for dataset, answers in (
         ("toy_movie_review", toy_answers),
-        ("sst_continuation", SST_CONTINUATION_ANSWERS),
+        ("sst_classification", SST_CLASSIFICATION_ANSWERS),
     ):
         for label, values in answers.items():
             for pair_index, answer in enumerate(values):
@@ -151,6 +156,10 @@ def _pair_manifest_rows(adapter: CausalLMAdapter, dataset: str, pairs) -> list[d
                 "corrupted_label": pair.corrupted.label,
                 "clean_text": pair.clean.text,
                 "corrupted_text": pair.corrupted.text,
+                "clean_text_repr": repr(pair.clean.text),
+                "corrupted_text_repr": repr(pair.corrupted.text),
+                "clean_utf8_hex": pair.clean.text.encode("utf-8").hex(),
+                "corrupted_utf8_hex": pair.corrupted.text.encode("utf-8").hex(),
                 "clean_sha256": hashlib.sha256(pair.clean.text.encode("utf-8")).hexdigest(),
                 "corrupted_sha256": hashlib.sha256(pair.corrupted.text.encode("utf-8")).hexdigest(),
                 "clean_token_ids": json.dumps(clean_ids),
@@ -158,6 +167,38 @@ def _pair_manifest_rows(adapter: CausalLMAdapter, dataset: str, pairs) -> list[d
                 "clean_num_tokens": len(clean_ids),
                 "corrupted_num_tokens": len(corrupted_ids),
                 "equal_token_length": len(clean_ids) == len(corrupted_ids),
+                "clean_source_text": pair.clean.metadata.get("sentence"),
+                "corrupted_source_text": pair.corrupted.metadata.get("sentence"),
+                "binarization_method": pair.clean.metadata.get("binarization_method"),
+                "pythia_correct": pair.clean.metadata.get("pythia_correct")
+                and pair.corrupted.metadata.get("pythia_correct"),
+            }
+        )
+    return rows
+
+
+def _sst_candidate_manifest_rows(adapter: CausalLMAdapter, examples) -> list[dict]:
+    rows: list[dict] = []
+    for example in examples:
+        tokenized = adapter.tokenize([example])
+        token_ids = tokenized.input_ids[0][tokenized.attention_mask[0].bool()].tolist()
+        rows.append(
+            {
+                "example_id": example.example_id,
+                "split": example.metadata.get("split"),
+                "label": example.label,
+                "binarization_method": example.metadata.get("binarization_method"),
+                "pythia_correct": example.metadata.get("pythia_correct"),
+                "sentiment_score": example.metadata.get("score"),
+                "source_text": example.metadata.get("sentence"),
+                "prompt_text": example.text,
+                "prompt_repr": repr(example.text),
+                "prompt_utf8_hex": example.text.encode("utf-8").hex(),
+                "prompt_sha256": hashlib.sha256(example.text.encode("utf-8")).hexdigest(),
+                "gpt2_token_ids": json.dumps(token_ids),
+                "gpt2_num_tokens": len(token_ids),
+                "pythia_raw_num_tokens": example.metadata.get("pythia_raw_num_tokens"),
+                "pythia_prompt_num_tokens": example.metadata.get("pythia_prompt_num_tokens"),
             }
         )
     return rows
@@ -186,6 +227,9 @@ def run_reproduction(config: ReproductionConfig) -> Path:
     run_dir.mkdir(parents=True, exist_ok=True)
     resolved = config.to_dict()
     resolved["runtime"] = adapter.provenance()
+    sst_metadata_path = Path(config.data.sst_processed_dir) / "metadata.json"
+    if sst_metadata_path.is_file():
+        resolved["sst_preprocessing"] = json.loads(sst_metadata_path.read_text())
     (run_dir / "resolved_config.json").write_text(json.dumps(resolved, indent=2, sort_keys=True))
 
     raw_toy = load_toy_movie_review(config.data.toy_config)
@@ -211,7 +255,15 @@ def run_reproduction(config: ReproductionConfig) -> Path:
     _write_rows(_answer_manifest_rows(adapter, toy.answers), run_dir / "answer_tokens.csv")
     _write_rows(_vocabulary_manifest_rows(adapter, raw_toy, toy), run_dir / "toy_vocabulary.csv")
 
-    sst_examples = load_sst(config.data.sst_root, config.data.sst_split)
+    sst_examples = load_processed_sst_candidates(
+        config.data.sst_processed_dir,
+        config_name=config.data.sst_dataset_config,
+        split=config.data.sst_split,
+    )
+    _write_rows(
+        _sst_candidate_manifest_rows(adapter, sst_examples),
+        run_dir / "sst_candidate_manifest.csv",
+    )
     if config.data.sst_max_examples is not None:
         sst_examples_for_projection = sst_examples[: config.data.sst_max_examples]
     else:
@@ -227,7 +279,11 @@ def run_reproduction(config: ReproductionConfig) -> Path:
     pair_rows = [
         *_pair_manifest_rows(adapter, "toy_train", train_pairs),
         *_pair_manifest_rows(adapter, "toy_test", test_pairs),
-        *_pair_manifest_rows(adapter, f"sst_{config.data.sst_split}", sst_pairs),
+        *_pair_manifest_rows(
+            adapter,
+            f"sst_{config.data.sst_dataset_config}_{config.data.sst_split}",
+            sst_pairs,
+        ),
     ]
     _write_rows(pair_rows, run_dir / "pair_manifest.csv")
 
@@ -385,7 +441,7 @@ def run_reproduction(config: ReproductionConfig) -> Path:
                 sst_pairs,
                 artifact.vector,
                 layer=layer,
-                answers=SST_CONTINUATION_ANSWERS,
+                answers=SST_CLASSIFICATION_ANSWERS,
                 position="all",
                 batch_size=config.model.batch_size,
             )

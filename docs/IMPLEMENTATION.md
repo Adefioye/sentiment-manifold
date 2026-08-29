@@ -30,7 +30,7 @@ The experiment runner fits every configured method at every configured boundary 
 - optional exploratory OpenWebText baseline loss, resample-ablated loss, loss increase, and four
   matched random-direction controls, enabled only by
   `experiment.openwebtext_resample_ablation` or `--with-openwebtext-resample-ablation`;
-- one best SST-validation layer per method.
+- one best paper-style SST-test layer per method.
 
 Logit-difference recovery uses the clean target's answer ordering, matching Tigges et al.'s
 ``[correct, incorrect]`` answer-token convention. The model runs on the corrupted prompt; only the

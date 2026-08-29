@@ -11,9 +11,11 @@ model:
 data:
   toy_config: data/toy_movie_review.yaml
   sst_root: ../eliciting-latent-sentiment/stanfordSentimentTreebank
-  sst_split: dev
+  sst_processed_dir: data/processed/sst-pythia-1.4b
+  sst_dataset_config: tigges_pythia_correct
+  sst_split: test
   sst_max_examples: null
-  sst_max_pairs: 128
+  sst_max_pairs: null
   openwebtext_dataset: stas/openwebtext-10k
   openwebtext_split: train
   openwebtext_max_samples: 128

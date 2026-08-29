@@ -29,6 +29,8 @@ NEGATIVE_ANSWER = " Negative"
 NEUTRAL_LOWER = 0.4
 NEUTRAL_UPPER = 0.6
 SCAFFOLD_TEMPLATE = "Review Text: {text} Review Sentiment:"
+TIGGES_BINARIZATION = "tigges"
+NEUTRAL_REMOVED_BINARIZATION = "neutral_removed"
 
 
 @dataclass(frozen=True)
@@ -70,6 +72,40 @@ def binary_label_without_neutral(score: float) -> int | None:
     if score <= NEUTRAL_UPPER:
         return None
     return 1
+
+
+def tigges_binary_label(score: float) -> int:
+    """Match upstream ``int(round(score))`` including its 0.5 -> 0 tie."""
+    if not 0.0 <= score <= 1.0:
+        raise ValueError(f"SST sentiment score must be in [0, 1], got {score}")
+    return int(round(score))
+
+
+def binarize_rows(
+    rows: Iterable[dict[str, Any]], method: str
+) -> list[dict[str, Any]]:
+    """Apply one declared SST binary-label policy to source sentence rows."""
+    if method not in {TIGGES_BINARIZATION, NEUTRAL_REMOVED_BINARIZATION}:
+        raise ValueError(
+            f"Unknown SST binarization {method!r}; expected 'tigges' or 'neutral_removed'"
+        )
+    result: list[dict[str, Any]] = []
+    for source_row in rows:
+        row = dict(source_row)
+        if method == TIGGES_BINARIZATION:
+            label = tigges_binary_label(float(row["sentiment_score"]))
+        else:
+            label = binary_label_without_neutral(float(row["sentiment_score"]))
+            if label is None:
+                continue
+        row.update(
+            label=int(label),
+            label_name="positive" if label else "negative",
+            binarization_method=method,
+            is_neutral_removed=False,
+        )
+        result.append(row)
+    return result
 
 
 def load_sst_source_sentences(root: str | Path) -> list[dict[str, Any]]:
@@ -146,6 +182,24 @@ def remove_neutral(rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     return [dict(row) for row in rows if row["label"] is not None]
 
 
+def apply_labels_to_scored_rows(
+    scored_rows: Iterable[dict[str, Any]], labeled_rows: Iterable[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Attach a label policy to shared Pythia scores and recompute correctness."""
+    labels = {row["example_id"]: row for row in labeled_rows}
+    result: list[dict[str, Any]] = []
+    for scored_row in scored_rows:
+        labeled = labels.get(scored_row["example_id"])
+        if labeled is None:
+            continue
+        row = {**scored_row, **labeled}
+        logit_diff = float(row["positive_minus_negative_logit"])
+        row["signed_correct_logit_diff"] = logit_diff if row["label"] == 1 else -logit_diff
+        row["pythia_correct"] = int(row["predicted_label"]) == int(row["label"])
+        result.append(row)
+    return result
+
+
 def _single_token_id(tokenizer, text: str) -> int:
     token_ids = tokenizer(text, add_special_tokens=False)["input_ids"]
     if len(token_ids) != 1:
@@ -171,7 +225,7 @@ def score_test_sentences_with_pythia(
     batch_size: int = 16,
     revision: str | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Score neutral-removed SST test sentences with paper's Pythia classifier."""
+    """Score labeled SST test sentences with the paper's Pythia classifier."""
     if batch_size < 1:
         raise ValueError("batch_size must be positive")
     test_rows = [dict(row) for row in rows if row["split"] == "test"]
@@ -252,6 +306,11 @@ def score_test_sentences_with_pythia(
 
 def make_maximal_matches(rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     """Make maximal deterministic, non-reused opposite-label matches."""
+    rows = [dict(row) for row in rows]
+    methods = {row.get("binarization_method", "unspecified") for row in rows}
+    if len(methods) > 1:
+        raise ValueError("Pairing rows must use one SST binarization method")
+    method = next(iter(methods), "unspecified")
     buckets: dict[tuple[int, int], dict[int, list[dict[str, Any]]]] = {}
     for row in rows:
         if not row["pythia_correct"]:
@@ -268,10 +327,11 @@ def make_maximal_matches(rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]
             buckets[(raw_length, prompt_length)][1], key=lambda row: row["sentence_index"]
         )
         for pos, neg in zip(positive, negative):
-            pair_id = f"sst-pythia-pair-{len(matches):05d}"
+            pair_id = f"sst-{method}-pythia-pair-{len(matches):05d}"
             matches.append(
                 {
                     "pair_id": pair_id,
+                    "binarization_method": method,
                     "split": "test",
                     "pythia_raw_num_tokens": raw_length,
                     "pythia_prompt_num_tokens": prompt_length,
@@ -349,6 +409,9 @@ def _single_test_dataset(rows: list[dict[str, Any]]) -> DatasetDict:
 
 
 def _dataset_card(metadata: dict[str, Any], counts: dict[str, Any]) -> str:
+    config_lines = "\n".join(
+        f"- config_name: {name}" for name in metadata["dataset_configs"]
+    )
     return f"""---
 language:
 - en
@@ -357,11 +420,7 @@ task_categories:
 pretty_name: Sentiment Manifold SST Pythia-1.4B Preprocessing
 license: other
 configs:
-- config_name: neutral_removed
-- config_name: pythia_scored
-- config_name: pythia_correct
-- config_name: matched_pairs
-- config_name: directed_pairs
+{config_lines}
 ---
 
 # Sentiment Manifold SST Pythia-1.4B Preprocessing
@@ -370,23 +429,22 @@ Source-sentence preprocessing for reproducing the SST directional-patching setup
 *Language Models Linearly Represent Sentiment*. The source is Stanford Sentiment Treebank v1.0.
 Consult the original SST distribution for its terms and citation requirements.
 
-## Intentional deviation
+## Binary-label variants
 
-The paper and accompanying code collapse scores around 0.5. This dataset instead removes SST's
-official neutral interval `(0.4, 0.6]`, as requested: scores `<= 0.4` are negative and scores `> 0.6`
-are positive.
+`tigges` follows the accompanying code's `int(round(score))` behavior: scores `<= 0.5` are
+negative and scores `> 0.5` are positive. `neutral_removed` preserves the alternative policy:
+scores `<= 0.4` are negative, `(0.4, 0.6]` is removed, and scores `> 0.6` are positive.
 
 ## Configurations
 
-- `neutral_removed`: source sentences outside the neutral interval, preserving train/validation/test.
-- `pythia_scored`: all neutral-removed test sentences with Pythia logits and correctness.
-- `pythia_correct`: the Pythia-correct subset used as pairing candidates.
-- `matched_pairs`: maximal deterministic non-reused positive/negative matches with equal Pythia lengths.
-- `directed_pairs`: every match represented in both clean/corrupted directions for patching.
+Each variant has `*_binarized`, `*_pythia_scored`, `*_pythia_correct`, `*_matched_pairs`,
+and `*_directed_pairs` configurations. When both variants are requested, Pythia is scored once on
+all Tigges-binarized test rows and correctness is computed independently for each label policy.
 
 No GPT-4 labels or manual pair validation are used. Matches are opposite according to SST's human labels;
 they are not minimal semantic rewrites. Downstream GPT-2 and Qwen experiments should re-pair
-`pythia_correct` using the target tokenizer because tokenizer lengths differ between model families.
+the relevant `*_pythia_correct` configuration using the target tokenizer because tokenizer lengths
+differ between model families.
 
 ## Counts
 
@@ -447,6 +505,7 @@ def preprocess_sst(
     dtype: str = "auto",
     batch_size: int = 16,
     revision: str | None = None,
+    binarization: str = "both",
     push_to_hub: bool = False,
     hub_repo_id: str | None = None,
     private: bool = True,
@@ -466,26 +525,61 @@ def preprocess_sst(
     output_dir = Path(output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    requested_methods = {
+        "both": (TIGGES_BINARIZATION, NEUTRAL_REMOVED_BINARIZATION),
+        TIGGES_BINARIZATION: (TIGGES_BINARIZATION,),
+        NEUTRAL_REMOVED_BINARIZATION: (NEUTRAL_REMOVED_BINARIZATION,),
+    }
+    if binarization not in requested_methods:
+        raise ValueError("binarization must be 'both', 'tigges', or 'neutral_removed'")
+
     source_rows = load_sst_source_sentences(sst_root)
-    neutral_removed = remove_neutral(source_rows)
-    scored, model_metadata = score_test_sentences_with_pythia(
-        neutral_removed,
+    variants = {
+        method: binarize_rows(source_rows, method)
+        for method in requested_methods[binarization]
+    }
+    scoring_method = (
+        TIGGES_BINARIZATION
+        if TIGGES_BINARIZATION in variants
+        else NEUTRAL_REMOVED_BINARIZATION
+    )
+    shared_scored, model_metadata = score_test_sentences_with_pythia(
+        variants[scoring_method],
         device=device,
         dtype=dtype,
         batch_size=batch_size,
         revision=revision,
     )
-    correct = [row for row in scored if row["pythia_correct"]]
-    matches = make_maximal_matches(correct)
-    directed = make_directed_pairs(matches)
 
-    datasets = {
-        "neutral_removed": _dataset_dict_by_split(neutral_removed),
-        "pythia_scored": _single_test_dataset(scored),
-        "pythia_correct": _single_test_dataset(correct),
-        "matched_pairs": _single_test_dataset(matches),
-        "directed_pairs": _single_test_dataset(directed),
-    }
+    datasets: dict[str, DatasetDict] = {}
+    variant_counts: dict[str, Any] = {}
+    for method, binarized in variants.items():
+        scored = apply_labels_to_scored_rows(shared_scored, binarized)
+        correct = [row for row in scored if row["pythia_correct"]]
+        if any(not row["pythia_correct"] for row in correct):
+            raise AssertionError("Pythia-correct SST configuration contains an incorrect row")
+        matches = make_maximal_matches(correct)
+        directed = make_directed_pairs(matches)
+        datasets.update(
+            {
+                f"{method}_binarized": _dataset_dict_by_split(binarized),
+                f"{method}_pythia_scored": _single_test_dataset(scored),
+                f"{method}_pythia_correct": _single_test_dataset(correct),
+                f"{method}_matched_pairs": _single_test_dataset(matches),
+                f"{method}_directed_pairs": _single_test_dataset(directed),
+            }
+        )
+        variant_counts[method] = {
+            "binarized": {
+                split: sum(row["split"] == split for row in binarized)
+                for split in ("train", "validation", "test")
+            },
+            "pythia_scored_test": len(scored),
+            "pythia_correct_test": len(correct),
+            "pythia_incorrect_test": len(scored) - len(correct),
+            "matched_pairs": len(matches),
+            "directed_pairs": len(directed),
+        }
     for config_name, dataset_dict in datasets.items():
         dataset_dict.save_to_disk(output_dir / config_name)
 
@@ -495,21 +589,13 @@ def preprocess_sst(
             "sentiment_labels.txt",
             "datasetSplit.txt",
             "dictionary_fixed.txt",
+            "dictionary.txt",
             "datasetSentences_fixed.txt",
+            "datasetSentences.txt",
         )
         if (sst_root / name).exists()
     }
-    counts = {
-        "source_sentences": len(source_rows),
-        "neutral_removed": {
-            split: len(dataset) for split, dataset in datasets["neutral_removed"].items()
-        },
-        "pythia_scored_test": len(scored),
-        "pythia_correct_test": len(correct),
-        "pythia_incorrect_test": len(scored) - len(correct),
-        "matched_pairs": len(matches),
-        "directed_pairs": len(directed),
-    }
+    counts = {"source_sentences": len(source_rows), "variants": variant_counts}
     metadata = {
         **model_metadata,
         "sst_root": str(sst_root),
@@ -519,10 +605,19 @@ def preprocess_sst(
         ),
         "split_mapping": {"1": "train", "2": "test", "3": "validation"},
         "binary_collapse": {
-            "negative": "score <= 0.4",
-            "neutral_removed": "0.4 < score <= 0.6",
-            "positive": "score > 0.6",
+            TIGGES_BINARIZATION: {
+                "negative": "score <= 0.5",
+                "positive": "score > 0.5",
+                "upstream_equivalent": "int(round(score))",
+            },
+            NEUTRAL_REMOVED_BINARIZATION: {
+                "negative": "score <= 0.4",
+                "neutral_removed": "0.4 < score <= 0.6",
+                "positive": "score > 0.6",
+            },
         },
+        "dataset_configs": list(datasets),
+        "requested_binarization": binarization,
         "pairing": (
             "maximal deterministic non-reused opposite-label matches by equal raw and prompt "
             "Pythia token counts"

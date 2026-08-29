@@ -3,10 +3,13 @@
 ## Stages
 
 1. Run `inspect-data` for each tokenizer and record how many of the paper's adjectives remain one token.
-2. Run a small layer subset on CPU/MPS/CUDA and confirm artifacts and metrics are finite.
-3. Run all GPT-2 Small boundaries with OpenWebText disabled. Select each method's layer by SST **dev** causal recovery.
-4. Compare modern GPT-2 results with the cached/reference TransformerLens directions and paper plots. Investigate hook, normalization, prompt, token, or pairing discrepancies before changing methodology.
-5. Freeze the pipeline and switch SST to `test`. Do not reselect the layer.
+2. Preprocess both SST binary-label variants with Pythia-1.4B. The reproduction runner consumes the
+   `tigges_pythia_correct` test configuration.
+3. Run a small layer subset on CPU/MPS/CUDA and confirm artifacts and metrics are finite.
+4. Run all GPT-2 Small boundaries with OpenWebText disabled. Select each method's layer by SST
+   **test** causal recovery, matching the paper objective.
+5. Compare modern GPT-2 results with paper plots. Investigate hook, normalization, prompt, token,
+   or pairing discrepancies before changing methodology.
 6. Reproduce the paper's first-layer OpenWebText projection analysis separately. Run resample
    ablation only as an explicitly labelled exploratory diagnostic.
 7. Repeat the same protocol for Qwen3-0.6B; describe it as an extension, not part of the original paper replication.
@@ -21,6 +24,7 @@ eight verbs are `enjoyed`, `loved`, `liked`, `appreciated`, `admired`, `hated`, 
 
 ```bash
 sentiment-manifold inspect-data --config configs/reproduction.yaml
+sentiment-manifold preprocess-sst --binarization both
 sentiment-manifold reproduce --config configs/reproduction.yaml --model gpt2-small --device auto
 sentiment-manifold reproduce --config configs/reproduction.yaml --model qwen-0.6b --device auto
 sentiment-manifold reproduce --config configs/reproduction.yaml --model gpt2-small --with-openwebtext-resample-ablation
@@ -55,7 +59,9 @@ cells:
 - `prompt_manifest.csv`: exact ToyMovieReview text, Python representation, UTF-8 bytes, SHA-256,
   token IDs, token count, and adjective focus position;
 - `toy_vocabulary.csv`: every source adjective/verb, tokenizer IDs, and one-token retention decision;
-- `answer_tokens.csv`: Tigges's five aligned ToyMovieReview answer pairs and SST continuation labels;
+- `answer_tokens.csv`: Tigges's five aligned ToyMovieReview answer pairs and SST classification labels;
+- `sst_candidate_manifest.csv`: every Pythia-correct SST candidate with source text, exact
+  classification prompt bytes, labels, scores, and Pythia/GPT-2 token lengths;
 - `pair_manifest.csv`: exact Toy train/test and SST clean/corrupted IDs, prompt hashes, token IDs,
   labels, and equal-length checks;
 - `direction_metadata.csv`: artifact path, dimensionality, and orientation convention;
@@ -65,7 +71,7 @@ cells:
   recovery, and literal flip indicator;
 - `metrics.csv`: per-method/layer aggregate projection and causal metrics;
 - `direction_similarities.csv`: one-dimensional absolute cosine similarities;
-- `best_layers.csv`: validation-selected layer for each method;
+- `best_layers.csv`: SST-test-selected layer for each method, matching the paper objective;
 - `openwebtext_controls.csv`: optional random controls when the exploratory resample ablation runs;
 - `directions/*.npz`: normalized 1D vectors or orthonormal DAS subspace bases with full metadata.
 
@@ -86,6 +92,9 @@ curves, and direction-similarity heatmaps under `figures/`; it does not rerun an
 - DAS uses an orthogonally parameterized rotation, normalized logit-difference objective, 64 epochs,
   GPT-2 Small batch size 128, and configured 1D/2D/3D variants;
 - the random direction control follows the upstream seed-42, layer-indexed sequence.
+- SST uses the test split, `Review Text: … Review Sentiment:`, `Positive`/`Negative` answers,
+  Tigges's binary collapse, and only Pythia-1.4B-correct candidates; the runner re-pairs that saved
+  pool at equal GPT-2 token length before all-position patching.
 
 Known parity boundaries remain and must not be hidden in reporting:
 
@@ -93,9 +102,9 @@ Known parity boundaries remain and must not be hidden in reporting:
 - the current upstream `SIMPLE_TRAIN` implementation computes its prompt count from the smaller core
   lists before loading the paper-era training lists; this code-path anomaly is not followed because
   it conflicts with the paper's stated dataset;
-- SST equal-length pairs are reconstructed deterministically from the source files instead of
-  loading an upstream shuffled pickle, so pair identities can differ even when the task definition
-  and aggregate metric agree.
+- SST equal-length pairs are reconstructed deterministically from the saved Pythia-correct pool
+  using the target tokenizer instead of loading an upstream shuffled pickle, so pair identities can
+  differ even when the task definition and aggregate metric agree.
 
 These are why hook boundary, prompt/token manifest, paired IDs, and metric comparisons remain
 required before claiming exact numerical reproduction. The output artifacts make each difference

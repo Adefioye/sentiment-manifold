@@ -86,6 +86,12 @@ def main(argv: list[str] | None = None) -> None:
     )
     preprocess.add_argument("--batch-size", type=int, default=16)
     preprocess.add_argument("--revision", default=None)
+    preprocess.add_argument(
+        "--binarization",
+        choices=["both", "tigges", "neutral_removed"],
+        default="both",
+        help="save both label policies by default, or only the selected policy",
+    )
     preprocess.add_argument("--push-to-hub", action="store_true")
     preprocess.add_argument(
         "--hub-repo-id",
@@ -150,6 +156,7 @@ def main(argv: list[str] | None = None) -> None:
             dtype=args.dtype,
             batch_size=args.batch_size,
             revision=args.revision,
+            binarization=args.binarization,
             push_to_hub=args.push_to_hub,
             hub_repo_id=args.hub_repo_id,
             private=not args.public,

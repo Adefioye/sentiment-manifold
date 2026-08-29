@@ -1,8 +1,13 @@
 from sentiment_manifold.data.sst_preprocessing import (
+    NEUTRAL_REMOVED_BINARIZATION,
+    TIGGES_BINARIZATION,
+    apply_labels_to_scored_rows,
+    binarize_rows,
     binary_label_without_neutral,
     make_directed_pairs,
     make_maximal_matches,
     remove_neutral,
+    tigges_binary_label,
 )
 from sentiment_manifold.cli import _token_from_environment
 
@@ -57,6 +62,100 @@ def test_binary_collapse_removes_official_neutral_interval():
     assert binary_label_without_neutral(1.0) == 1
     rows = [{"label": 0}, {"label": None}, {"label": 1}]
     assert [row["label"] for row in remove_neutral(rows)] == [0, 1]
+
+
+def test_tigges_binary_collapse_and_named_variants_have_exact_boundaries():
+    assert tigges_binary_label(0.0) == 0
+    assert tigges_binary_label(0.5) == 0
+    assert tigges_binary_label(0.50001) == 1
+    assert tigges_binary_label(1.0) == 1
+    source = [
+        {"example_id": "low", "sentiment_score": 0.4},
+        {"example_id": "tie", "sentiment_score": 0.5},
+        {"example_id": "upper", "sentiment_score": 0.6},
+        {"example_id": "high", "sentiment_score": 0.8},
+    ]
+    tigges = binarize_rows(source, TIGGES_BINARIZATION)
+    assert [row["label"] for row in tigges] == [0, 0, 1, 1]
+    assert all(row["binarization_method"] == TIGGES_BINARIZATION for row in tigges)
+    neutral_removed = binarize_rows(source, NEUTRAL_REMOVED_BINARIZATION)
+    assert [row["example_id"] for row in neutral_removed] == ["low", "high"]
+    assert [row["label"] for row in neutral_removed] == [0, 1]
+
+
+def test_shared_pythia_scores_are_relabelled_and_refiltered_per_variant():
+    scored = [
+        {
+            "example_id": "tie",
+            "positive_minus_negative_logit": 2.0,
+            "predicted_label": 1,
+        }
+    ]
+    tigges = binarize_rows(
+        [{"example_id": "tie", "sentiment_score": 0.5}], TIGGES_BINARIZATION
+    )
+    rebound = apply_labels_to_scored_rows(scored, tigges)
+    assert rebound[0]["label"] == 0
+    assert rebound[0]["signed_correct_logit_diff"] == -2.0
+    assert rebound[0]["pythia_correct"] is False
+
+
+def test_preprocess_saves_complete_config_family_for_both_methods(tmp_path, monkeypatch):
+    import sentiment_manifold.data.sst_preprocessing as module
+
+    source_rows = []
+    for index, score in enumerate((0.4, 0.5, 0.6, 0.8), start=1):
+        source_rows.append(
+            {
+                "example_id": f"sst-{index}",
+                "sentence_index": index,
+                "phrase_id": index + 100,
+                "text": f"review-{index}",
+                "sentiment_score": score,
+                "original_label_5": "neutral",
+                "label": binary_label_without_neutral(score),
+                "label_name": None,
+                "split": "test",
+                "is_neutral_removed": binary_label_without_neutral(score) is None,
+            }
+        )
+
+    def fake_score(rows, **_kwargs):
+        scored = []
+        for row in rows:
+            predicted = int(row["sentiment_score"] > 0.5)
+            diff = 1.0 if predicted else -1.0
+            scored.append(
+                {
+                    **row,
+                    "prompt": f"Review Text: {row['text']} Review Sentiment:",
+                    "pythia_raw_num_tokens": 4,
+                    "pythia_prompt_num_tokens": 9,
+                    "positive_minus_negative_logit": diff,
+                    "predicted_label": predicted,
+                    "signed_correct_logit_diff": 1.0,
+                    "pythia_correct": predicted == row["label"],
+                }
+            )
+        return scored, {"model_name": "fake-pythia"}
+
+    monkeypatch.setattr(module, "load_sst_source_sentences", lambda _root: source_rows)
+    monkeypatch.setattr(module, "score_test_sentences_with_pythia", fake_score)
+    result = module.preprocess_sst(sst_root=tmp_path, output_dir=tmp_path / "processed")
+    expected = {
+        f"{method}_{stage}"
+        for method in (TIGGES_BINARIZATION, NEUTRAL_REMOVED_BINARIZATION)
+        for stage in (
+            "binarized",
+            "pythia_scored",
+            "pythia_correct",
+            "matched_pairs",
+            "directed_pairs",
+        )
+    }
+    assert set(result.datasets) == expected
+    assert set(result.metadata["dataset_configs"]) == expected
+    assert all((result.output_dir / name).is_dir() for name in expected)
 
 
 def test_matches_are_maximal_non_reused_opposite_and_equal_length():

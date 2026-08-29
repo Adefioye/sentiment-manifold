@@ -13,6 +13,7 @@ source .venv/bin/activate
 pip install -e '.[dev,notebooks]'
 
 sentiment-manifold inspect-data --model gpt2-small
+sentiment-manifold preprocess-sst --binarization both
 sentiment-manifold reproduce --config configs/reproduction.yaml --model gpt2-small
 sentiment-manifold plot --run-dir outputs/gpt2-small
 ```
@@ -41,15 +42,24 @@ HF_TOKEN_PATH=/run/secrets/huggingface-token sentiment-manifold preprocess-sst -
 
 Credentials are checked before Pythia is downloaded or evaluated. The token is passed directly to the Hub APIs and is never written to local metadata or uploaded files.
 
-The command uses `EleutherAI/pythia-1.4b`, removes SST's official neutral interval `(0.4, 0.6]`, filters the test candidates to examples Pythia classifies correctly, constructs every possible non-reused opposite-label match with equal Pythia token lengths, and represents each match in both patching directions. It saves five local Hugging Face configurations under `data/processed/sst-pythia-1.4b` and publishes them to `<authenticated-user>/sentiment-manifold-sst-pythia-1.4b` as a private dataset repository:
+The command uses `EleutherAI/pythia-1.4b` and saves two binary-label families. `tigges` assigns
+negative to scores `<= 0.5` and positive to scores `> 0.5`, matching the paper code's
+`int(round(score))`. `neutral_removed` preserves the alternative rule: negative `<= 0.4`, remove
+`(0.4, 0.6]`, and positive `> 0.6`. Both use the SST test split, the
+`Review Text: … Review Sentiment:` classifier with `Positive`/`Negative` answers, and retain only
+examples Pythia classifies correctly. The default `--binarization both` saves ten local Hugging Face
+configurations under `data/processed/sst-pythia-1.4b` and can publish them to
+`<authenticated-user>/sentiment-manifold-sst-pythia-1.4b`:
 
-- `neutral_removed`: all retained source sentences across train, validation, and test splits;
-- `pythia_scored`: retained test sentences with Positive/Negative logits and correctness;
-- `pythia_correct`: the complete unpaired candidate pool for target-tokenizer re-pairing;
-- `matched_pairs`: maximal deterministic positive/negative matches without example reuse;
-- `directed_pairs`: both clean/corrupted intervention directions for every match.
+- `{tigges,neutral_removed}_binarized`;
+- `{tigges,neutral_removed}_pythia_scored`;
+- `{tigges,neutral_removed}_pythia_correct`;
+- `{tigges,neutral_removed}_matched_pairs`;
+- `{tigges,neutral_removed}_directed_pairs`.
 
-The candidate pool is intentionally uncapped. Downstream GPT-2 and Qwen experiments should re-pair `pythia_correct` with their own tokenizer because equal Pythia lengths do not imply equal lengths for another tokenizer. Pass `--hub-repo-id namespace/name` to choose a different repository or `--public` to publish publicly.
+The reproduction runner loads `tigges_pythia_correct` and re-pairs it with the GPT-2 tokenizer;
+Pythia remains the only correctness filter. The candidate pool is uncapped. Pass
+`--hub-repo-id namespace/name` to choose a different repository or `--public` to publish publicly.
 
 Read a private configuration using the same environment token:
 
@@ -59,7 +69,7 @@ from datasets import load_dataset
 
 candidate_pool = load_dataset(
     "your-namespace/sentiment-manifold-sst-pythia-1.4b",
-    "pythia_correct",
+    "tigges_pythia_correct",
     token=os.environ["HF_TOKEN"],
 )
 ```

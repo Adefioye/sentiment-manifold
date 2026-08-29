@@ -62,7 +62,8 @@ Notebooks call these APIs rather than defining separate experiment implementatio
 The reference repository uses TransformerLens and notebook-like scripts. This package uses native
 Hugging Face models to give GPT-2 and Qwen the same interface, explicit configuration, portable
 artifacts, and tests. The GPT-2 revision and BOS convention are pinned, but hook implementations,
-the upstream `SIMPLE_TRAIN` prompt-count anomaly, reconstructed SST pair identities, and runtime
-libraries can still produce numerical differences. Treat GPT-2 as implementation-parity work until
+the deliberately rejected upstream `SIMPLE_TRAIN` prompt-count anomaly, reconstructed SST pair
+identities, and runtime libraries can still produce numerical differences. Treat GPT-2 as
+implementation-parity work until
 the saved prompt/token/pair manifests and causal curves agree with the reference run; Qwen is an
 extension rather than a paper replication. `REPRODUCTION.md` records these boundaries explicitly.

@@ -6,7 +6,7 @@ train:
   positive_adjectives:
     [adequate, amazing, awesome, beautiful, brilliant, charming, cheerful, decent,
      delightful, excellent, exceptional, fabulous, fantastic, good, great,
-     incredible, lovely, nice, outstanding, perfect, pleasant, positive, remarkable,
+     incredible, extraordinary, lovely, nice, outstanding, perfect, pleasant, positive, remarkable,
      satisfactory, satisfying, splendid, spectacular, superb, terrific, wonderful]
   negative_adjectives:
     [annoying, awful, bad, boring, depressing, disastrous, disgusting, dire, dreadful,
@@ -21,10 +21,6 @@ test:
      rotten, sour, vile]
 verbs:
   positive:
-    [adored, admired, appreciated, applauded, approved, cherished, commended,
-     congratulated, embraced, endorsed, enjoyed, exalted, favored, glorified, liked,
-     loved, praised, relished, respected, savored, treasured, valued, welcomed]
+    [enjoyed, loved, liked, appreciated, admired]
   negative:
-    [abhorred, abominated, condemned, criticized, denounced, detested, disdained,
-     disliked, disparaged, disrespected, execrated, hated, loathed, reviled, scorned,
-     shunned, spurned, vilified]
+    [hated, disliked, despised]

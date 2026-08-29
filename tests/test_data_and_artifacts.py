@@ -12,9 +12,7 @@ PROJECT_ROOT = Path(__file__).parents[1]
 
 def test_toy_movie_review_preserves_paper_split_counts():
     dataset = load_toy_movie_review(PROJECT_ROOT / "data/toy_movie_review.yaml")
-    # The checked-in upstream prompts.yaml contains 54 train adjectives even
-    # though the paper describes a 55/30 split. Preserve the source artifact.
-    assert len(dataset.train) == 54
+    assert len(dataset.train) == 55
     assert len(dataset.test) == 30
     assert len(dataset.paired("train")) == 48
     assert len(dataset.paired("test")) == 28
@@ -24,7 +22,7 @@ def test_toy_movie_review_preserves_paper_split_counts():
 def test_toy_prompt_and_answers_match_tigges_source_bytes():
     dataset = load_toy_movie_review(PROJECT_ROOT / "data/toy_movie_review.yaml")
     assert dataset.train[0].text == (
-        "I thought this movie was adequate, I adored it. \nConclusion: This movie is"
+        "I thought this movie was adequate, I enjoyed it. \nConclusion: This movie is"
     )
     assert dataset.answers[1] == (" great", " amazing", " awesome", " good", " perfect")
     assert dataset.answers[0] == (
@@ -34,6 +32,10 @@ def test_toy_prompt_and_answers_match_tigges_source_bytes():
         " horrible",
         " disgusting",
     )
+    assert dataset.verbs[1] == ("enjoyed", "loved", "liked", "appreciated", "admired")
+    assert dataset.verbs[0] == ("hated", "disliked", "despised")
+    assert sum(len(words) for words in dataset.verbs.values()) == 8
+    assert "extraordinary" in dataset.adjectives["train"][1]
 
 
 def test_toy_corruption_uses_upstream_cyclic_shift():
@@ -80,6 +82,7 @@ def test_reproduction_config_pins_gpt2_and_tigges_settings():
     assert config.model.revision == "607a30d783dfa663caf39e06633721c8d4cfcd7e"
     assert config.model.prepend_bos is True
     assert config.das.epochs == 64
+    assert config.das.batch_size == 128
     assert config.das.implementation == "tigges_rotation"
     assert config.experiment.methods == [
         "mean_diff",

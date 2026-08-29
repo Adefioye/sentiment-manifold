@@ -87,4 +87,9 @@ The default configuration fits every layer with resample ablation disabled. For 
 
 ## Reproducibility boundary
 
-The ToyMovieReview vocabulary, prompt bytes, answer pairs, BOS convention, cyclic clean/corrupted pairing, all-position patching, and causal metrics match the MIT-licensed reference repository in `../eliciting-latent-sentiment`. SST is read from that checkout by default without duplicating the dataset. The package uses Hugging Face hooks rather than the historical TransformerLens backend, so exact paper-number claims still require the parity checks described in the reproduction guide.
+The ToyMovieReview 55/30 adjective split and eight verbs follow the paper-era inventory recoverable
+from the MIT-licensed reference repository's history. Prompt bytes, answer pairs, BOS convention,
+cyclic clean/corrupted pairing, all-position patching, and causal metrics otherwise follow the
+accompanying code in `../eliciting-latent-sentiment`. SST is read from that checkout without
+duplicating the dataset. The package uses Hugging Face hooks rather than the historical TransformerLens
+backend, so exact paper-number claims still require the parity checks in the reproduction guide.

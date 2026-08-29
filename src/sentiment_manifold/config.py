@@ -76,7 +76,9 @@ class DASConfig:
     epochs: int = 64
     learning_rate: float = 1e-3
     weight_decay: float = 0.0
-    batch_size: int = 16
+    # Upstream fit_directions.py uses 128 for GPT-2 Small. Model extensions
+    # should override this explicitly in their own configuration.
+    batch_size: int = 128
     max_grad_norm: float = 1.0
     implementation: str = "tigges_rotation"
 

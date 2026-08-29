@@ -30,7 +30,7 @@ from .models import CausalLMAdapter
 
 
 SST_CONTINUATION_ANSWERS = {1: (" good",), 0: (" bad",)}
-ARTIFACT_SCHEMA_VERSION = 2
+ARTIFACT_SCHEMA_VERSION = 3
 
 
 def _slug(value: str) -> str:

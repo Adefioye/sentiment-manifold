@@ -11,7 +11,11 @@
    ablation only as an explicitly labelled exploratory diagnostic.
 7. Repeat the same protocol for Qwen3-0.6B; describe it as an extension, not part of the original paper replication.
 
-The checked-in upstream `prompts.yaml` currently contains 54 training adjectives (30 positive and 24 negative) and 30 test adjectives, while the paper describes a 55/30 split. This project preserves the verifiable source list and records the discrepancy instead of inventing a 55th word. If an archived paper artifact supplies the missing item, add it with provenance and treat the resulting run as a separately versioned dataset.
+The paper specifies 55 training adjectives, 30 test adjectives, and eight verbs. The current upstream
+`prompts.yaml` has lost one historical training adjective and later expanded the verb lists. Repository
+history identifies the paper-era inventory: `extraordinary` is the 55th training adjective, and the
+eight verbs are `enjoyed`, `loved`, `liked`, `appreciated`, `admired`, `hated`, `disliked`, and
+`despised`. This project uses that paper-intended inventory rather than the later expanded lists.
 
 ## Commands
 
@@ -72,22 +76,23 @@ curves, and direction-similarity heatmaps under `figures/`; it does not rerun an
 
 - the GPT-2 model/tokenizer commit is pinned and its resolved revisions are saved;
 - tokenization explicitly prepends BOS, matching TransformerLens `prepend_bos=True`;
-- ToyMovieReview uses the reference prompt bytes and its five positive/negative answers;
+- ToyMovieReview uses the paper's 55/30 adjective split, eight paper-era verbs, reference prompt
+  bytes, and five positive/negative answers;
 - tokenizer filtering is recorded rather than silently changing the prompt vocabulary;
 - clean/corrupted terminology and the reference cyclic prompt shift are used;
 - directional patching edits every token position (`placeholders = ['ALL']` upstream);
 - K-means uses `n_init=10`, logistic regression uses `max_iter=1000`, and PCA's arbitrary raw sign is
   recorded before the exported axis is oriented for stable reporting;
 - DAS uses an orthogonally parameterized rotation, normalized logit-difference objective, 64 epochs,
-  and configured 1D/2D/3D variants;
+  GPT-2 Small batch size 128, and configured 1D/2D/3D variants;
 - the random direction control follows the upstream seed-42, layer-indexed sequence.
 
 Known parity boundaries remain and must not be hidden in reporting:
 
 - the runner uses Hugging Face hooks rather than TransformerLens;
-- it consumes all 54 verifiable training adjectives from `prompts.yaml`, whereas the current
-  upstream `SIMPLE_TRAIN` implementation computes its prompt count from the smaller core lists
-  before loading the training lists; this appears inconsistent with the paper's stated 55/30 split;
+- the current upstream `SIMPLE_TRAIN` implementation computes its prompt count from the smaller core
+  lists before loading the paper-era training lists; this code-path anomaly is not followed because
+  it conflicts with the paper's stated dataset;
 - SST equal-length pairs are reconstructed deterministically from the source files instead of
   loading an upstream shuffled pickle, so pair identities can differ even when the task definition
   and aggregate metric agree.

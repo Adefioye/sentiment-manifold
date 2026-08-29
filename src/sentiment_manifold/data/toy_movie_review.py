@@ -24,7 +24,12 @@ class ToyMovieReview:
         n = min(len(positive), len(negative))
         pairs: list[CounterfactualPair] = []
         for pos, neg in zip(positive[:n], negative[:n]):
-            pairs.extend((CounterfactualPair(pos, neg), CounterfactualPair(neg, pos)))
+            pairs.extend(
+                (
+                    CounterfactualPair(clean=pos, corrupted=neg),
+                    CounterfactualPair(clean=neg, corrupted=pos),
+                )
+            )
         return pairs
 
 

@@ -104,7 +104,12 @@ def pair_sst_by_token_length(
         rng.shuffle(positive)
         rng.shuffle(negative)
         for pos, neg in zip(positive, negative):
-            pairs.extend((CounterfactualPair(pos, neg), CounterfactualPair(neg, pos)))
+            pairs.extend(
+                (
+                    CounterfactualPair(clean=pos, corrupted=neg),
+                    CounterfactualPair(clean=neg, corrupted=pos),
+                )
+            )
             if max_pairs is not None and len(pairs) >= 2 * max_pairs:
                 return pairs[: 2 * max_pairs]
     return pairs

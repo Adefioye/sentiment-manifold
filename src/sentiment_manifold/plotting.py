@@ -20,12 +20,18 @@ def plot_run(run_dir: str | Path) -> list[Path]:
     outputs: list[Path] = []
     sns.set_theme(style="whitegrid")
 
-    for metric in ("toy_patch_recovery", "sst_patch_recovery", "sst_flip_rate"):
+    for metric in (
+        "toy_logit_diff_percent",
+        "toy_logit_flip_percent",
+        "sst_logit_diff_percent",
+        "sst_logit_flip_percent",
+    ):
         if metric not in metrics:
             continue
         figure, axis = plt.subplots(figsize=(9, 5))
         sns.lineplot(data=metrics, x="layer", y=metric, hue="method", marker="o", ax=axis)
         axis.set_title(metric.replace("_", " ").title())
+        axis.set_ylabel("Percent (%)")
         figure.tight_layout()
         path = figure_dir / f"{metric}_by_layer.png"
         figure.savefig(path, dpi=180)

@@ -47,7 +47,7 @@ The command uses `EleutherAI/pythia-1.4b`, removes SST's official neutral interv
 - `pythia_scored`: retained test sentences with Positive/Negative logits and correctness;
 - `pythia_correct`: the complete unpaired candidate pool for target-tokenizer re-pairing;
 - `matched_pairs`: maximal deterministic positive/negative matches without example reuse;
-- `directed_pairs`: both clean/source intervention directions for every match.
+- `directed_pairs`: both clean/corrupted intervention directions for every match.
 
 The candidate pool is intentionally uncapped. Downstream GPT-2 and Qwen experiments should re-pair `pythia_correct` with their own tokenizer because equal Pythia lengths do not imply equal lengths for another tokenizer. Pass `--hub-repo-id namespace/name` to choose a different repository or `--public` to publish publicly.
 

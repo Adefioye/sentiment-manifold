@@ -78,7 +78,7 @@ def test_matches_are_maximal_non_reused_opposite_and_equal_length():
     directed = make_directed_pairs(matches)
     assert len(directed) == 2
     assert {row["clean_label"] for row in directed} == {0, 1}
-    assert all(row["clean_label"] != row["source_label"] for row in directed)
+    assert all(row["clean_label"] != row["corrupted_label"] for row in directed)
     assert {row["direction"] for row in directed} == {
         "positive_to_negative",
         "negative_to_positive",

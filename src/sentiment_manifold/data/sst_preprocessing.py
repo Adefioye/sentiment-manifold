@@ -295,17 +295,22 @@ def make_maximal_matches(rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]
 
 
 def make_directed_pairs(matches: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Represent each positive/negative match in both intervention directions."""
+    """Represent each match in both clean/corrupted patching directions."""
     directed: list[dict[str, Any]] = []
     for match in matches:
-        for clean_polarity, source_polarity in (("positive", "negative"), ("negative", "positive")):
+        for clean_polarity, corrupted_polarity in (
+            ("positive", "negative"),
+            ("negative", "positive"),
+        ):
             clean_label = int(clean_polarity == "positive")
             directed.append(
                 {
-                    "case_id": f"{match['pair_id']}-{clean_polarity}-to-{source_polarity}",
+                    "case_id": (
+                        f"{match['pair_id']}-{corrupted_polarity}-to-{clean_polarity}"
+                    ),
                     "pair_id": match["pair_id"],
                     "split": match["split"],
-                    "direction": f"{clean_polarity}_to_{source_polarity}",
+                    "direction": f"{corrupted_polarity}_to_{clean_polarity}",
                     "pythia_raw_num_tokens": match["pythia_raw_num_tokens"],
                     "pythia_prompt_num_tokens": match["pythia_prompt_num_tokens"],
                     "clean_example_id": match[f"{clean_polarity}_example_id"],
@@ -316,12 +321,12 @@ def make_directed_pairs(matches: Iterable[dict[str, Any]]) -> list[dict[str, Any
                     "clean_answer": POSITIVE_ANSWER.strip()
                     if clean_label
                     else NEGATIVE_ANSWER.strip(),
-                    "source_example_id": match[f"{source_polarity}_example_id"],
-                    "source_text": match[f"{source_polarity}_text"],
-                    "source_prompt": match[f"{source_polarity}_prompt"],
-                    "source_label": 1 - clean_label,
-                    "source_label_name": source_polarity,
-                    "source_answer": NEGATIVE_ANSWER.strip()
+                    "corrupted_example_id": match[f"{corrupted_polarity}_example_id"],
+                    "corrupted_text": match[f"{corrupted_polarity}_text"],
+                    "corrupted_prompt": match[f"{corrupted_polarity}_prompt"],
+                    "corrupted_label": 1 - clean_label,
+                    "corrupted_label_name": corrupted_polarity,
+                    "corrupted_answer": NEGATIVE_ANSWER.strip()
                     if clean_label
                     else POSITIVE_ANSWER.strip(),
                 }
@@ -377,7 +382,7 @@ are positive.
 - `pythia_scored`: all neutral-removed test sentences with Pythia logits and correctness.
 - `pythia_correct`: the Pythia-correct subset used as pairing candidates.
 - `matched_pairs`: maximal deterministic non-reused positive/negative matches with equal Pythia lengths.
-- `directed_pairs`: every match represented in both clean/source directions for patching.
+- `directed_pairs`: every match represented in both clean/corrupted directions for patching.
 
 No GPT-4 labels or manual pair validation are used. Matches are opposite according to SST's human labels;
 they are not minimal semantic rewrites. Downstream GPT-2 and Qwen experiments should re-pair

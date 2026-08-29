@@ -25,11 +25,11 @@ class DASTrainingConfig:
     seed: int = 0
 
 
-def directional_replace(base: Tensor, source: Tensor, direction: Tensor) -> Tensor:
-    """Replace only the scalar projection onto a unit direction."""
-    unit = F.normalize(direction.float(), dim=0).to(base.dtype)
-    delta = ((source - base) * unit).sum(dim=-1, keepdim=True)
-    return base + delta * unit
+def directional_replace(corrupted: Tensor, clean: Tensor, direction: Tensor) -> Tensor:
+    """Replace the corrupted activation's scalar projection with the clean one."""
+    unit = F.normalize(direction.float(), dim=0).to(corrupted.dtype)
+    delta = ((clean - corrupted) * unit).sum(dim=-1, keepdim=True)
+    return corrupted + delta * unit
 
 
 class DASFitter:
@@ -70,41 +70,41 @@ class DASFitter:
                 selected = [
                     pairs[index] for index in indices[start : start + self.config.batch_size]
                 ]
-                base_examples = [pair.base for pair in selected]
-                source_examples = [pair.source for pair in selected]
-                base = adapter.tokenize(base_examples).to(adapter.device_spec.device)
-                source = adapter.tokenize(source_examples).to(adapter.device_spec.device)
-                if base.focus_positions is None or source.focus_positions is None:
+                corrupted_examples = [pair.corrupted for pair in selected]
+                clean_examples = [pair.clean for pair in selected]
+                corrupted = adapter.tokenize(corrupted_examples).to(adapter.device_spec.device)
+                clean = adapter.tokenize(clean_examples).to(adapter.device_spec.device)
+                if corrupted.focus_positions is None or clean.focus_positions is None:
                     raise ValueError("DAS training requires focus spans")
                 with torch.no_grad():
-                    source_activations = adapter.boundary_activations(source, layer)
-                    source_rows = source_activations[
-                        torch.arange(len(selected), device=source_activations.device),
-                        source.focus_positions,
+                    clean_activations = adapter.boundary_activations(clean, layer)
+                    clean_rows = clean_activations[
+                        torch.arange(len(selected), device=clean_activations.device),
+                        clean.focus_positions,
                     ].detach()
 
                 def editor(hidden: Tensor) -> Tensor:
                     edited = hidden.clone()
                     row = torch.arange(len(selected), device=hidden.device)
-                    positions = base.focus_positions
+                    positions = corrupted.focus_positions
                     edited[row, positions] = directional_replace(
-                        hidden[row, positions], source_rows.to(hidden.dtype), raw_direction
+                        hidden[row, positions], clean_rows.to(hidden.dtype), raw_direction
                     )
                     return edited
 
                 optimizer.zero_grad(set_to_none=True)
                 with adapter.edit_boundary(layer, editor):
                     outputs = adapter.model(
-                        input_ids=base.input_ids,
-                        attention_mask=base.attention_mask,
+                        input_ids=corrupted.input_ids,
+                        attention_mask=corrupted.attention_mask,
                         use_cache=False,
                     )
-                final_positions = adapter.last_positions(base.attention_mask)
+                final_positions = adapter.last_positions(corrupted.attention_mask)
                 logits = outputs.logits[
                     torch.arange(len(selected), device=outputs.logits.device), final_positions
                 ].float()
                 targets = torch.tensor(
-                    [answer_ids[pair.source.label] for pair in selected],
+                    [answer_ids[pair.clean.label] for pair in selected],
                     device=logits.device,
                     dtype=torch.long,
                 )
@@ -117,7 +117,7 @@ class DASFitter:
             epoch_losses.append(running_loss / max(1, batches))
 
         direction = F.normalize(raw_direction.detach(), dim=0).cpu().numpy()
-        examples = [pair.base for pair in pairs]
+        examples = [pair.corrupted for pair in pairs]
         activations = adapter.extract_activations(
             examples, layer, position="focus", batch_size=self.config.batch_size
         )

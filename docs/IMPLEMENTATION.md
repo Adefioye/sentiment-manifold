@@ -14,13 +14,25 @@ Five positive-oriented unit-direction APIs are implemented:
 
 The experiment runner fits every configured method at every configured boundary and writes portable compressed direction checkpoints. It reports:
 
-- ToyMovieReview held-out projection accuracy, patching recovery, and flip rate;
-- SST final-position projection accuracy and all-token paired patching recovery/flip rate;
+- ToyMovieReview held-out projection accuracy, patching recovery, and target-directed logit-flip
+  percentage;
+- SST final-position projection accuracy and all-token paired patching recovery/logit-flip
+  percentage;
 - within-layer absolute cosine similarity among all five directions;
 - optional exploratory OpenWebText baseline loss, resample-ablated loss, loss increase, and four
   matched random-direction controls, enabled only by
   `experiment.openwebtext_resample_ablation` or `--with-openwebtext-resample-ablation`;
 - one best SST-validation layer per method.
+
+Logit-difference recovery uses the clean target's answer ordering, matching Tigges et al.'s
+``[correct, incorrect]`` answer-token convention. The model runs on the corrupted prompt; only the
+selected activation projection is copied from the clean run, producing the patched run. Logit flip
+requires the raw positive-minus-negative logit difference to change sign from corrupted to patched,
+with the patched sign selecting the clean target. The primary `*_logit_flip_percent` additionally
+reproduces the reference code's bias centering and calibration between corrupted and clean accuracy;
+`*_sign_flip_percent` records the literal per-example sign-change percentage. These are equal under
+the paper's 0%-corrupted/100%-clean benchmark construction, and any difference diagnoses a
+dataset-parity problem. `metrics.csv` preserves normalized and paper-scale percentage columns.
 
 ## Package map
 

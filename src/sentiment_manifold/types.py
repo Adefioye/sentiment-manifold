@@ -22,9 +22,9 @@ class TextExample:
 
 @dataclass(frozen=True)
 class CounterfactualPair:
-    base: TextExample
-    source: TextExample
+    clean: TextExample
+    corrupted: TextExample
 
     def __post_init__(self) -> None:
-        if self.base.label == self.source.label:
+        if self.clean.label == self.corrupted.label:
             raise ValueError("A counterfactual pair must cross sentiment labels")

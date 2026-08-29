@@ -63,12 +63,12 @@ def run_reproduction(config: ReproductionConfig) -> Path:
     train_pairs = [
         pair
         for pair in toy.paired("train")
-        if pair.base.example_id in allowed_train and pair.source.example_id in allowed_train
+        if pair.clean.example_id in allowed_train and pair.corrupted.example_id in allowed_train
     ]
     test_pairs = [
         pair
         for pair in toy.paired("test")
-        if pair.base.example_id in allowed_test and pair.source.example_id in allowed_test
+        if pair.clean.example_id in allowed_test and pair.corrupted.example_id in allowed_test
     ]
     if not toy_train or not toy_test:
         raise RuntimeError("Tokenizer filtering removed every ToyMovieReview example")
@@ -202,11 +202,25 @@ def run_reproduction(config: ReproductionConfig) -> Path:
                 ),
                 "toy_patch_recovery": toy_patch.recovery,
                 "toy_flip_rate": toy_patch.flip_rate,
+                "toy_sign_flip_rate": toy_patch.sign_flip_rate,
+                "toy_logit_diff_percent": toy_patch.recovery_percent,
+                "toy_logit_flip_percent": toy_patch.flip_percent,
+                "toy_sign_flip_percent": toy_patch.sign_flip_percent,
+                "toy_corrupted_accuracy": toy_patch.corrupted_accuracy,
+                "toy_clean_accuracy": toy_patch.clean_accuracy,
+                "toy_patched_accuracy": toy_patch.patched_accuracy,
                 "sst_projection_accuracy": projection_accuracy(
                     sst_activations, labels_sst, artifact.vector, threshold
                 ),
                 "sst_patch_recovery": sst_patch.recovery,
                 "sst_flip_rate": sst_patch.flip_rate,
+                "sst_sign_flip_rate": sst_patch.sign_flip_rate,
+                "sst_logit_diff_percent": sst_patch.recovery_percent,
+                "sst_logit_flip_percent": sst_patch.flip_percent,
+                "sst_sign_flip_percent": sst_patch.sign_flip_percent,
+                "sst_corrupted_accuracy": sst_patch.corrupted_accuracy,
+                "sst_clean_accuracy": sst_patch.clean_accuracy,
+                "sst_patched_accuracy": sst_patch.patched_accuracy,
                 "n_toy_test": len(toy_test),
                 "n_sst": len(sst_examples_for_projection),
                 "n_sst_pairs": len(sst_pairs),

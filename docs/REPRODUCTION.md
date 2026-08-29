@@ -32,3 +32,10 @@ Install the project editable in Colab and call `maybe_mount_google_drive(True)` 
 ## Numerical comparison checklist
 
 Record the exact model and tokenizer revision, dependency lock, dtype, accelerator, seed, prompt bytes, retained vocabulary, answer token IDs, paired SST IDs, layer-boundary definition, direction orientation, DAS losses, and per-pair metrics. Recovery remains unclipped; values above 100% are possible and informative.
+
+For Table 1-style reporting, use the `*_logit_diff_percent` and `*_logit_flip_percent` columns in
+`metrics.csv`; the latter matches the reference code's centered, baseline-calibrated accuracy score.
+The corresponding `*_sign_flip_percent` column is the literal pre/post sign-change rate and should be
+identical on a paper-parity dataset. Normalized columns remain available for model selection. Per-pair
+raw clean/corrupted/patched logit differences and sign-flip indicators are recorded in
+`patching_records.csv` for auditing.

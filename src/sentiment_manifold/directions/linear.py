@@ -56,15 +56,26 @@ class KMeansFitter(DirectionFitter):
 class LogisticRegressionFitter(DirectionFitter):
     name = "logistic_regression"
 
-    def __init__(self, *, random_state: int = 0, max_iter: int = 1000, tol: float = 1e-4) -> None:
+    def __init__(
+        self,
+        *,
+        random_state: int = 0,
+        c: float = 1.0,
+        solver: str = "liblinear",
+        max_iter: int = 1000,
+        tol: float = 1e-4,
+    ) -> None:
         self.random_state = random_state
+        self.c = c
+        self.solver = solver
         self.max_iter = max_iter
         self.tol = tol
 
     def fit(self, activations: FloatArray, labels: IntArray) -> FitResult:
         x, y = self.validate(activations, labels)
         model = LogisticRegression(
-            solver="liblinear",
+            C=self.c,
+            solver=self.solver,
             random_state=self.random_state,
             max_iter=self.max_iter,
             tol=self.tol,
@@ -76,7 +87,8 @@ class LogisticRegressionFitter(DirectionFitter):
             {
                 "train_accuracy": float(model.score(x, y)),
                 "intercept": float(model.intercept_[0]),
-                "solver": "liblinear",
+                "c": self.c,
+                "solver": self.solver,
                 "max_iter": self.max_iter,
                 "tol": self.tol,
                 **self.orientation_diagnostics(direction, x, y),

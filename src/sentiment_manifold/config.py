@@ -73,6 +73,15 @@ class ExperimentConfig:
 
 
 @dataclass
+class FittingConfig:
+    kmeans_n_init: int = 10
+    logistic_c: float = 1.0
+    logistic_solver: str = "liblinear"
+    logistic_max_iter: int = 1000
+    logistic_tol: float = 1e-4
+
+
+@dataclass
 class DASConfig:
     epochs: int = 64
     learning_rate: float = 1e-3
@@ -85,12 +94,28 @@ class DASConfig:
 
 
 @dataclass
+class TuningConfig:
+    validation_fraction: float = 0.25
+    selection_metric: str = "toy_validation_logit_diff_percent"
+    seeds: list[int] = field(default_factory=lambda: [0, 1, 2])
+    kmeans_n_init: list[int] = field(default_factory=lambda: [10, 50])
+    logistic_c: list[float] = field(default_factory=lambda: [0.01, 0.1, 1.0, 10.0])
+    das_learning_rate: list[float] = field(default_factory=lambda: [3e-4, 1e-3])
+    das_weight_decay: list[float] = field(default_factory=lambda: [0.0])
+    das_epochs: list[int] = field(default_factory=lambda: [32, 64])
+    das_batch_size: list[int] = field(default_factory=lambda: [128])
+    das_max_grad_norm: list[float] = field(default_factory=lambda: [1.0])
+
+
+@dataclass
 class ReproductionConfig:
     seed: int = 0
     model: ModelConfig = field(default_factory=ModelConfig)
     data: DataConfig = field(default_factory=DataConfig)
     experiment: ExperimentConfig = field(default_factory=ExperimentConfig)
+    fitting: FittingConfig = field(default_factory=FittingConfig)
     das: DASConfig = field(default_factory=DASConfig)
+    tuning: TuningConfig = field(default_factory=TuningConfig)
     source_path: Path | None = None
 
     @classmethod
@@ -107,7 +132,9 @@ class ReproductionConfig:
             model=ModelConfig(**raw.get("model", {})),
             data=DataConfig(**raw.get("data", {})),
             experiment=ExperimentConfig(**experiment),
+            fitting=FittingConfig(**raw.get("fitting", {})),
             das=DASConfig(**raw.get("das", {})),
+            tuning=TuningConfig(**raw.get("tuning", {})),
             source_path=path,
         )
         cfg._resolve_paths(path.parent.parent)

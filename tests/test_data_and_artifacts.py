@@ -84,6 +84,9 @@ def test_reproduction_config_pins_gpt2_and_tigges_settings():
     assert config.das.epochs == 64
     assert config.das.batch_size == 128
     assert config.das.implementation == "tigges_rotation"
+    assert config.fitting.kmeans_n_init == 10
+    assert config.fitting.logistic_c == 1.0
+    assert config.fitting.logistic_solver == "liblinear"
     assert config.experiment.methods == [
         "mean_diff",
         "kmeans",

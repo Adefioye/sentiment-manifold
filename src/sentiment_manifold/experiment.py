@@ -36,7 +36,7 @@ from .reporting import select_table1_best_layers
 
 
 SST_CLASSIFICATION_ANSWERS = {1: (" Positive",), 0: (" Negative",)}
-ARTIFACT_SCHEMA_VERSION = 3
+ARTIFACT_SCHEMA_VERSION = 4
 
 
 def _slug(value: str) -> str:
@@ -205,8 +205,46 @@ def _sst_candidate_manifest_rows(adapter: CausalLMAdapter, examples) -> list[dic
     return rows
 
 
-def _artifact_is_compatible(artifact: DirectionArtifact, method: str) -> bool:
+def _method_fit_hyperparameters(
+    config: ReproductionConfig, method: str, layer: int
+) -> dict[str, object]:
+    if method == "kmeans":
+        return {
+            "n_init": config.fitting.kmeans_n_init,
+            "random_state": config.seed,
+        }
+    if method == "logistic_regression":
+        return {
+            "c": config.fitting.logistic_c,
+            "solver": config.fitting.logistic_solver,
+            "max_iter": config.fitting.logistic_max_iter,
+            "tol": config.fitting.logistic_tol,
+            "random_state": config.seed,
+        }
+    if method in {"das", "das2d", "das3d"}:
+        return {
+            "dimension": {"das": 1, "das2d": 2, "das3d": 3}[method],
+            "implementation": config.das.implementation,
+            "epochs": config.das.epochs,
+            "learning_rate": config.das.learning_rate,
+            "weight_decay": config.das.weight_decay,
+            "batch_size": config.das.batch_size,
+            "max_grad_norm": config.das.max_grad_norm,
+            "seed": config.seed,
+        }
+    if method == "random":
+        return {"layer": layer, "seed": 42}
+    return {}
+
+
+def _artifact_is_compatible(
+    artifact: DirectionArtifact,
+    method: str,
+    expected_hyperparameters: dict[str, object],
+) -> bool:
     if artifact.metadata.get("artifact_schema_version") != ARTIFACT_SCHEMA_VERSION:
+        return False
+    if artifact.metadata.get("fit_hyperparameters") != expected_hyperparameters:
         return False
     if method.startswith("das"):
         return artifact.metadata.get("implementation") == "tigges_rotation"
@@ -322,10 +360,11 @@ def run_reproduction(config: ReproductionConfig) -> Path:
         )
         layer_directions: dict[str, np.ndarray] = {}
         for method in config.experiment.methods:
+            fit_hyperparameters = _method_fit_hyperparameters(config, method, layer)
             path = artifact_path(run_dir, method, layer)
             if config.experiment.resume and path.exists():
                 artifact = DirectionArtifact.load(path)
-                if not _artifact_is_compatible(artifact, method):
+                if not _artifact_is_compatible(artifact, method, fit_hyperparameters):
                     artifact = None
             else:
                 artifact = None
@@ -351,8 +390,21 @@ def run_reproduction(config: ReproductionConfig) -> Path:
                     )
                     result = fitter.fit(adapter, train_pairs, layer=layer, answers=toy.answers)
                 else:
-                    if method in {"kmeans", "logistic_regression"}:
-                        fitter = create_fitter(method, random_state=config.seed)
+                    if method == "kmeans":
+                        fitter = create_fitter(
+                            method,
+                            random_state=config.seed,
+                            n_init=config.fitting.kmeans_n_init,
+                        )
+                    elif method == "logistic_regression":
+                        fitter = create_fitter(
+                            method,
+                            random_state=config.seed,
+                            c=config.fitting.logistic_c,
+                            solver=config.fitting.logistic_solver,
+                            max_iter=config.fitting.logistic_max_iter,
+                            tol=config.fitting.logistic_tol,
+                        )
                     elif method == "random":
                         fitter = create_fitter(method, layer=layer, seed=42)
                     else:
@@ -365,6 +417,7 @@ def run_reproduction(config: ReproductionConfig) -> Path:
                     "model_revision": adapter.provenance()["resolved_model_revision"],
                     "tokenizer_revision": adapter.provenance()["resolved_tokenizer_revision"],
                     "prepend_bos": adapter.prepend_bos,
+                    "fit_hyperparameters": fit_hyperparameters,
                 }
                 if result.direction.ndim == 1:
                     metadata["projection_threshold"] = projection_threshold(

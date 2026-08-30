@@ -27,6 +27,8 @@ def test_closed_form_fitters_return_positive_unit_lines(method, separated_data):
 def test_reference_fitter_hyperparameters():
     assert KMeansFitter().n_init == 10
     logistic = LogisticRegressionFitter()
+    assert logistic.c == pytest.approx(1.0)
+    assert logistic.solver == "liblinear"
     assert logistic.max_iter == 1000
     assert logistic.tol == pytest.approx(1e-4)
 

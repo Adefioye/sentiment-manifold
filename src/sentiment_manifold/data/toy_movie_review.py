@@ -22,17 +22,7 @@ class ToyMovieReview:
 
     def paired(self, split: str) -> list[CounterfactualPair]:
         examples = self.train if split == "train" else self.test
-        positive = [example for example in examples if example.label == 1]
-        negative = [example for example in examples if example.label == 0]
-        n = min(len(positive), len(negative))
-        # Tigges interleaves positive/negative clean prompts, then constructs the
-        # corrupted batch with ``all_prompts[1:] + [all_prompts[0]]``.
-        interleaved = [example for pair in zip(positive[:n], negative[:n]) for example in pair]
-        corrupted = interleaved[1:] + interleaved[:1]
-        return [
-            CounterfactualPair(clean=clean, corrupted=corrupt)
-            for clean, corrupt in zip(interleaved, corrupted)
-        ]
+        return pair_toy_examples(examples)
 
     def tokenizer_filtered(self, tokenizer) -> "ToyMovieReview":
         """Mirror upstream filtering of adjectives and verbs to one leading-space token."""
@@ -73,6 +63,22 @@ class ToyMovieReview:
             adjectives=filtered_adjectives,
             verbs={label: tuple(words) for label, words in filtered_verbs.items()},
         )
+
+
+def pair_toy_examples(examples: list[TextExample]) -> list[CounterfactualPair]:
+    """Construct Tigges's cyclic clean/corrupted pairing for an example subset."""
+
+    positive = [example for example in examples if example.label == 1]
+    negative = [example for example in examples if example.label == 0]
+    n = min(len(positive), len(negative))
+    # Tigges interleaves positive/negative clean prompts, then constructs the
+    # corrupted batch with ``all_prompts[1:] + [all_prompts[0]]``.
+    interleaved = [example for pair in zip(positive[:n], negative[:n]) for example in pair]
+    corrupted = interleaved[1:] + interleaved[:1]
+    return [
+        CounterfactualPair(clean=clean, corrupted=corrupt)
+        for clean, corrupt in zip(interleaved, corrupted)
+    ]
 
 
 def _make_examples(

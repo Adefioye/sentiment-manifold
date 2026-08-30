@@ -10,9 +10,11 @@ from pathlib import Path
 from .config import ReproductionConfig
 from .data import load_toy_movie_review, preprocess_sst
 from .devices import resolve_device
+from .directions import list_fitters
 from .experiment import run_reproduction
 from .models import CausalLMAdapter
 from .plotting import plot_run
+from .tuning import TUNABLE_METHODS, run_confirmation, run_tuning
 
 
 def _load_with_overrides(args) -> ReproductionConfig:
@@ -25,6 +27,31 @@ def _load_with_overrides(args) -> ReproductionConfig:
         config.model.device = args.device
     if getattr(args, "output_dir", None):
         config.experiment.output_dir = str(Path(args.output_dir).resolve())
+    if getattr(args, "seed", None) is not None:
+        config.seed = int(args.seed)
+    methods = getattr(args, "method", None)
+    if methods:
+        config.experiment.methods = [methods] if isinstance(methods, str) else list(methods)
+    if getattr(args, "layer", None):
+        config.experiment.layers = list(args.layer)
+    if getattr(args, "kmeans_n_init", None) is not None:
+        config.fitting.kmeans_n_init = int(args.kmeans_n_init)
+    if getattr(args, "logistic_c", None) is not None:
+        config.fitting.logistic_c = float(args.logistic_c)
+    if getattr(args, "logistic_max_iter", None) is not None:
+        config.fitting.logistic_max_iter = int(args.logistic_max_iter)
+    if getattr(args, "logistic_tol", None) is not None:
+        config.fitting.logistic_tol = float(args.logistic_tol)
+    if getattr(args, "das_learning_rate", None) is not None:
+        config.das.learning_rate = float(args.das_learning_rate)
+    if getattr(args, "das_weight_decay", None) is not None:
+        config.das.weight_decay = float(args.das_weight_decay)
+    if getattr(args, "das_epochs", None) is not None:
+        config.das.epochs = int(args.das_epochs)
+    if getattr(args, "das_batch_size", None) is not None:
+        config.das.batch_size = int(args.das_batch_size)
+    if getattr(args, "das_max_grad_norm", None) is not None:
+        config.das.max_grad_norm = float(args.das_max_grad_norm)
     if getattr(args, "with_openwebtext_resample_ablation", False):
         config.experiment.openwebtext_resample_ablation = True
     if getattr(args, "with_openwebtext", False):
@@ -61,6 +88,28 @@ def main(argv: list[str] | None = None) -> None:
     reproduce.add_argument("--model", choices=["gpt2-small", "qwen-0.6b"], default=None)
     reproduce.add_argument("--device", choices=["auto", "cuda", "mps", "cpu"], default=None)
     reproduce.add_argument("--output-dir", default=None)
+    reproduce.add_argument("--seed", type=int, default=None)
+    reproduce.add_argument(
+        "--method",
+        action="append",
+        choices=list_fitters(),
+        help="run only this method; repeat to run more than one",
+    )
+    reproduce.add_argument(
+        "--layer",
+        action="append",
+        type=int,
+        help="run only this residual boundary; repeat to run more than one",
+    )
+    reproduce.add_argument("--kmeans-n-init", type=int, default=None)
+    reproduce.add_argument("--logistic-c", type=float, default=None)
+    reproduce.add_argument("--logistic-max-iter", type=int, default=None)
+    reproduce.add_argument("--logistic-tol", type=float, default=None)
+    reproduce.add_argument("--das-learning-rate", type=float, default=None)
+    reproduce.add_argument("--das-weight-decay", type=float, default=None)
+    reproduce.add_argument("--das-epochs", type=int, default=None)
+    reproduce.add_argument("--das-batch-size", type=int, default=None)
+    reproduce.add_argument("--das-max-grad-norm", type=float, default=None)
     reproduce.add_argument(
         "--with-openwebtext-resample-ablation",
         action="store_true",
@@ -70,6 +119,35 @@ def main(argv: list[str] | None = None) -> None:
 
     plot_parser = subparsers.add_parser("plot", help="render plots from a completed run")
     plot_parser.add_argument("--run-dir", required=True)
+
+    tune_parser = subparsers.add_parser(
+        "tune",
+        help="select one method's layer and hyperparameters on Toy training-validation only",
+    )
+    tune_parser.add_argument("--config", default="configs/tuning.yaml")
+    tune_parser.add_argument("--model", choices=["gpt2-small", "qwen-0.6b"], default=None)
+    tune_parser.add_argument("--device", choices=["auto", "cuda", "mps", "cpu"], default=None)
+    tune_parser.add_argument("--output-dir", default=None)
+    tune_parser.add_argument("--seed", type=int, default=None)
+    tune_parser.add_argument("--method", choices=TUNABLE_METHODS, required=True)
+    tune_parser.add_argument(
+        "--layer",
+        action="append",
+        type=int,
+        help="tune only this residual boundary; repeat to tune more than one",
+    )
+
+    confirm_parser = subparsers.add_parser(
+        "confirm",
+        help="refit one validation-selected configuration and evaluate locked test/OOD data",
+    )
+    confirm_parser.add_argument("--config", default="configs/reproduction.yaml")
+    confirm_parser.add_argument("--selection", required=True)
+    confirm_parser.add_argument("--method", choices=TUNABLE_METHODS, default=None)
+    confirm_parser.add_argument("--model", choices=["gpt2-small", "qwen-0.6b"], default=None)
+    confirm_parser.add_argument("--device", choices=["auto", "cuda", "mps", "cpu"], default=None)
+    confirm_parser.add_argument("--output-dir", required=True)
+    confirm_parser.add_argument("--seed", type=int, default=None)
 
     preprocess = subparsers.add_parser(
         "preprocess-sst",
@@ -143,6 +221,17 @@ def main(argv: list[str] | None = None) -> None:
     elif args.command == "plot":
         for path in plot_run(args.run_dir):
             print(path)
+    elif args.command == "tune":
+        run_dir = run_tuning(_load_with_overrides(args), args.method)
+        print(f"Completed validation tuning: {run_dir}")
+    elif args.command == "confirm":
+        run_dir = run_confirmation(
+            _load_with_overrides(args),
+            args.selection,
+            method=args.method,
+            confirmation_seed=args.seed,
+        )
+        print(f"Completed frozen confirmation: {run_dir}")
     elif args.command == "preprocess-sst":
         hf_token = _token_from_environment(args.hf_token_env) if args.push_to_hub else None
         if args.push_to_hub and not hf_token:

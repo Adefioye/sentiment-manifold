@@ -31,6 +31,10 @@ sentiment-manifold reproduce --config configs/reproduction.yaml --model gpt2-sma
 sentiment-manifold plot --run-dir outputs/gpt2-small
 ```
 
+For separate commands for mean difference, K-means, logistic regression, PCA, DAS 1D/2D/3D, and
+the random control—and for the optional Toy-training-only tuning workflow—see
+[Per-method reproduction and optional tuning](METHOD_COMMANDS.md).
+
 The last command is optional and exploratory; it is not the paper's core OpenWebText evaluation. For a smoke run, replace `experiment.layers: all` with a short list such as `[0, 6, 12]`, set `das.epochs: 1`, and limit SST pairs/OpenWebText samples. These changes are debugging settings and must not be reported as the final reproduction.
 
 ## Colab and Google Drive

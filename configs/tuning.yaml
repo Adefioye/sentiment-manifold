@@ -4,30 +4,25 @@ model:
   name: gpt2-small
   revision: 607a30d783dfa663caf39e06633721c8d4cfcd7e
   prepend_bos: true
-  device: cpu
-  dtype: float32
+  device: auto
+  dtype: auto
   batch_size: 16
 
 data:
   toy_config: data/toy_movie_review.yaml
+  # These remain configured for the later confirmation command. The tuning
+  # runner never loads SST or OpenWebText.
   sst_root: ../eliciting-latent-sentiment/stanfordSentimentTreebank
   sst_processed_dir: data/processed/sst-pythia-1.4b
   sst_dataset_config: tigges_pythia_correct
   sst_split: test
-  sst_max_examples: 32
-  sst_max_pairs: 2
-  openwebtext_dataset: stas/openwebtext-10k
-  openwebtext_split: train
-  openwebtext_max_samples: 8
-  openwebtext_sequence_length: 32
-  openwebtext_random_seeds: [1]
 
 experiment:
-  layers: [0]
-  methods: [mean_diff, kmeans, logistic_regression, pca, das]
+  layers: all
+  methods: [mean_diff]
   openwebtext_resample_ablation: false
-  output_dir: outputs/smoke
-  resume: true
+  output_dir: outputs/tuning
+  resume: false
 
 fitting:
   kmeans_n_init: 10
@@ -37,9 +32,21 @@ fitting:
   logistic_tol: 0.0001
 
 das:
-  epochs: 1
+  epochs: 64
   learning_rate: 0.001
   weight_decay: 0.0
-  batch_size: 16
+  batch_size: 128
   max_grad_norm: 1.0
   implementation: tigges_rotation
+
+tuning:
+  validation_fraction: 0.25
+  selection_metric: toy_validation_logit_diff_percent
+  seeds: [0, 1, 2]
+  kmeans_n_init: [10, 50]
+  logistic_c: [0.01, 0.1, 1.0, 10.0]
+  das_learning_rate: [0.0003, 0.001]
+  das_weight_decay: [0.0]
+  das_epochs: [32, 64]
+  das_batch_size: [128]
+  das_max_grad_norm: [1.0]

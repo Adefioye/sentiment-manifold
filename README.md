@@ -93,7 +93,7 @@ experiment:
 
 It is expensive because it evaluates every selected layer and fitting method, followed by the configured random-direction controls. Keep it disabled for smoke runs. The paper's OpenWebText evaluation instead studies first-layer sentiment projections using GPT-4-labelled tokens; that correlational evaluation should be reported separately from this optional loss diagnostic.
 
-The default configuration fits every layer with resample ablation disabled. For a smoke run, reduce `experiment.layers`, `das.epochs`, and the SST pair limit. See [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) and [docs/REPRODUCTION.md](docs/REPRODUCTION.md).
+The default configuration fits every layer with resample ablation disabled. For a smoke run, reduce `experiment.layers`, `das.epochs`, and the SST pair limit. See [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md), [docs/REPRODUCTION.md](docs/REPRODUCTION.md), and [docs/METHOD_COMMANDS.md](docs/METHOD_COMMANDS.md). The last guide gives copy-ready commands for every method and a leakage-safe, optional validation-tuning workflow.
 
 Completed runs retain every per-layer measurement in `metrics.csv`. The paper-style
 `best_layers.csv` independently records the maximizing layer and value for logit difference and

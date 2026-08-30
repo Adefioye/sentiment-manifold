@@ -6,8 +6,8 @@
 2. Preprocess both SST binary-label variants with Pythia-1.4B. The reproduction runner consumes the
    `tigges_pythia_correct` test configuration.
 3. Run a small layer subset on CPU/MPS/CUDA and confirm artifacts and metrics are finite.
-4. Run all GPT-2 Small boundaries with OpenWebText disabled. Select each method's layer by SST
-   **test** causal recovery, matching the paper objective.
+4. Run all GPT-2 Small boundaries with OpenWebText disabled. For the paper-style Table 1 report,
+   independently take the maximum across layers for each method in all four dataset/metric columns.
 5. Compare modern GPT-2 results with paper plots. Investigate hook, normalization, prompt, token,
    or pairing discrepancies before changing methodology.
 6. Reproduce the paper's first-layer OpenWebText projection analysis separately. Run resample
@@ -44,9 +44,14 @@ Record the exact model and tokenizer revision, dependency lock, dtype, accelerat
 For Table 1-style reporting, use the `*_logit_diff_percent` and `*_logit_flip_percent` columns in
 `metrics.csv`; the latter matches the reference code's centered, baseline-calibrated accuracy score.
 The corresponding `*_sign_flip_percent` column is the literal pre/post sign-change rate and should be
-identical on a paper-parity dataset. Normalized columns remain available for model selection. Per-pair
+identical on a paper-parity dataset. Normalized columns remain available as diagnostics. Per-pair
 raw clean/corrupted/patched logit differences and sign-flip indicators are recorded in
 `patching_records.csv` for auditing.
+
+`best_layers.csv` applies that reporting rule independently. It contains four rows per method—one
+for each ToyMovieReview/SST × logit-difference/logit-flip cell—with `layer` and `value_percent`.
+Consequently, its rows are paper-table maxima, not a claim that one locked layer transfers between
+datasets and metrics. Tied maxima use the lower layer boundary deterministically.
 
 ## Saved run artifacts
 
@@ -71,12 +76,14 @@ cells:
   recovery, and literal flip indicator;
 - `metrics.csv`: per-method/layer aggregate projection and causal metrics;
 - `direction_similarities.csv`: one-dimensional absolute cosine similarities;
-- `best_layers.csv`: SST-test-selected layer for each method, matching the paper objective;
+- `best_layers.csv`: independently maximized layer and value for every method and each of the four
+  Table 1 dataset/metric columns;
 - `openwebtext_controls.csv`: optional random controls when the exploratory resample ablation runs;
 - `directions/*.npz`: normalized 1D vectors or orthonormal DAS subspace bases with full metadata.
 
-`sentiment-manifold plot` consumes these saved CSVs and writes the causal layer curves, DAS loss
-curves, and direction-similarity heatmaps under `figures/`; it does not rerun an experiment.
+`sentiment-manifold plot` consumes these saved CSVs and writes the causal layer curves, a rendered
+Table 1-style best-result table, DAS loss curves, and direction-similarity heatmaps under `figures/`;
+it does not rerun an experiment.
 
 ## Reference-code parity now enforced
 

@@ -11,12 +11,63 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
 
+from .reporting import select_table1_best_layers, table1_cell_text, validate_best_layers
+
+
+def _load_best_layers(run_dir: Path, metrics: pd.DataFrame) -> pd.DataFrame:
+    """Load the current schema, deriving it in memory for legacy run folders."""
+
+    path = run_dir / "best_layers.csv"
+    if path.exists():
+        best = pd.read_csv(path)
+        try:
+            validate_best_layers(best)
+        except ValueError:
+            # Older runs stored one complete SST-recovery-selected metrics row
+            # per method. Recompute the paper table from their metrics without
+            # mutating the archived run.
+            return select_table1_best_layers(metrics)
+        return best
+    return select_table1_best_layers(metrics)
+
+
+def _plot_table1_results(best: pd.DataFrame, figure_dir: Path) -> list[Path]:
+    outputs: list[Path] = []
+    for model, model_best in best.groupby("model", sort=False):
+        table = table1_cell_text(model_best)
+        if table.empty:
+            continue
+        figure_width = max(10.0, 2.4 * len(table.columns))
+        figure_height = max(3.0, 0.55 * len(table.index) + 1.8)
+        figure, axis = plt.subplots(figsize=(figure_width, figure_height))
+        axis.axis("off")
+        rendered = axis.table(
+            cellText=table.values,
+            rowLabels=[str(method).replace("_", " ") for method in table.index],
+            colLabels=table.columns,
+            cellLoc="center",
+            rowLoc="center",
+            loc="center",
+        )
+        rendered.auto_set_font_size(False)
+        rendered.set_fontsize(9)
+        rendered.scale(1.0, 1.65)
+        axis.set_title(f"Table 1 best-across-layer results — {model}", pad=20)
+        figure.tight_layout()
+        suffix = "" if best["model"].nunique() == 1 else f"_{model}"
+        path = figure_dir / f"table1_best_results{suffix}.png"
+        figure.savefig(path, dpi=180, bbox_inches="tight")
+        plt.close(figure)
+        outputs.append(path)
+    return outputs
+
 
 def plot_run(run_dir: str | Path) -> list[Path]:
     run_dir = Path(run_dir)
     figure_dir = run_dir / "figures"
     figure_dir.mkdir(parents=True, exist_ok=True)
     metrics = pd.read_csv(run_dir / "metrics.csv")
+    best = _load_best_layers(run_dir, metrics)
     outputs: list[Path] = []
     sns.set_theme(style="whitegrid")
 
@@ -37,6 +88,8 @@ def plot_run(run_dir: str | Path) -> list[Path]:
         figure.savefig(path, dpi=180)
         plt.close(figure)
         outputs.append(path)
+
+    outputs.extend(_plot_table1_results(best, figure_dir))
 
     loss_path = run_dir / "das_losses.csv"
     if loss_path.exists():
@@ -62,11 +115,9 @@ def plot_run(run_dir: str | Path) -> list[Path]:
             outputs.append(path)
 
     similarity_path = run_dir / "direction_similarities.csv"
-    best_path = run_dir / "best_layers.csv"
-    if not similarity_path.exists() or not best_path.exists():
+    if not similarity_path.exists():
         return outputs
     similarities = pd.read_csv(similarity_path)
-    best = pd.read_csv(best_path)
     for layer in sorted(best.layer.unique()):
         subset = similarities[similarities.layer == layer]
         table = subset.pivot(index="method_a", columns="method_b", values="absolute_cosine")

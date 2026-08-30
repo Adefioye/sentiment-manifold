@@ -25,7 +25,6 @@ data:
 experiment:
   layers: all
   methods: [mean_diff, kmeans, logistic_regression, pca, das, das2d, das3d, random]
-  selection_metric: sst_patch_recovery
   openwebtext_resample_ablation: false
   output_dir: outputs
   resume: true

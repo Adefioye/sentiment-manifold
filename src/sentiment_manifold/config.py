@@ -60,7 +60,6 @@ class ExperimentConfig:
             "random",
         ]
     )
-    selection_metric: str = "sst_patch_recovery"
     openwebtext_resample_ablation: bool = False
     # Compatibility with configurations created before the exploratory
     # diagnostic received its own explicit name.
@@ -98,11 +97,16 @@ class ReproductionConfig:
     def load(cls, path: str | Path) -> "ReproductionConfig":
         path = Path(path).resolve()
         raw = yaml.safe_load(path.read_text()) or {}
+        experiment = dict(raw.get("experiment", {}))
+        # Configurations from the earlier single-metric selection pipeline may
+        # still contain this key. Table 1 reporting now uses four fixed paper
+        # metrics and intentionally ignores that legacy setting.
+        experiment.pop("selection_metric", None)
         cfg = cls(
             seed=int(raw.get("seed", 0)),
             model=ModelConfig(**raw.get("model", {})),
             data=DataConfig(**raw.get("data", {})),
-            experiment=ExperimentConfig(**raw.get("experiment", {})),
+            experiment=ExperimentConfig(**experiment),
             das=DASConfig(**raw.get("das", {})),
             source_path=path,
         )

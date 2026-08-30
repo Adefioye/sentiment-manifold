@@ -95,6 +95,11 @@ It is expensive because it evaluates every selected layer and fitting method, fo
 
 The default configuration fits every layer with resample ablation disabled. For a smoke run, reduce `experiment.layers`, `das.epochs`, and the SST pair limit. See [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md) and [docs/REPRODUCTION.md](docs/REPRODUCTION.md).
 
+Completed runs retain every per-layer measurement in `metrics.csv`. The paper-style
+`best_layers.csv` independently records the maximizing layer and value for logit difference and
+logit flip on both ToyMovieReview and SST; it does not force all four reported values to share one
+layer. The plotting command renders this summary as `figures/table1_best_results.png`.
+
 ## Reproducibility boundary
 
 The ToyMovieReview 55/30 adjective split and eight verbs follow the paper-era inventory recoverable

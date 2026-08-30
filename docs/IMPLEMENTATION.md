@@ -30,7 +30,8 @@ The experiment runner fits every configured method at every configured boundary 
 - optional exploratory OpenWebText baseline loss, resample-ablated loss, loss increase, and four
   matched random-direction controls, enabled only by
   `experiment.openwebtext_resample_ablation` or `--with-openwebtext-resample-ablation`;
-- one best paper-style SST-test layer per method.
+- one independently best layer and value for every method in each of the four Table 1 columns:
+  ToyMovieReview/SST crossed with logit difference/logit flip.
 
 Logit-difference recovery uses the clean target's answer ordering, matching Tigges et al.'s
 ``[correct, incorrect]`` answer-token convention. The model runs on the corrupted prompt; only the
@@ -40,7 +41,8 @@ centers per-prompt correct-minus-incorrect differences, converts their signs to 
 calibrates patched accuracy between corrupted and clean accuracy. `*_sign_flip_percent` is retained
 as a separate audit statistic for literal corrupted-to-patched sign changes toward the clean target.
 It must not be substituted for the paper metric. `metrics.csv` preserves normalized and paper-scale
-columns for both.
+columns for both. `best_layers.csv` is a long-form reporting artifact with four rows per method; it
+does not select one direction for reuse across datasets or metrics.
 
 ## Package map
 
@@ -55,7 +57,8 @@ src/sentiment_manifold/
 └── storage.py     local/Colab/Drive output routing
 ```
 
-Notebooks call these APIs rather than defining separate experiment implementations. `CLAUDE.md` and `.claude/skills/sentiment-research/` provide project-aware agent guidance.
+Notebooks call these APIs rather than defining separate experiment implementations. `AGENTS.md` and
+`.claude/skills/sentiment-research/` provide project-aware agent guidance.
 
 ## Deliberate differences from the reference code
 

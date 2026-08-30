@@ -32,6 +32,7 @@ from .evaluation import (
 )
 from .evaluation.projections import projection_threshold
 from .models import CausalLMAdapter
+from .reporting import select_table1_best_layers
 
 
 SST_CLASSIFICATION_ANSWERS = {1: (" Positive",), 0: (" Negative",)}
@@ -545,10 +546,6 @@ def run_reproduction(config: ReproductionConfig) -> Path:
             _write_rows(owt_control_rows, run_dir / "openwebtext_controls.csv")
 
     metrics = pd.DataFrame(metrics_rows)
-    selection = config.experiment.selection_metric
-    if selection not in metrics.columns:
-        raise ValueError(f"Selection metric {selection!r} not in {list(metrics.columns)}")
-    valid = metrics.dropna(subset=[selection])
-    best = valid.loc[valid.groupby("method")[selection].idxmax()].sort_values("method")
+    best = select_table1_best_layers(metrics)
     best.to_csv(run_dir / "best_layers.csv", index=False)
     return run_dir

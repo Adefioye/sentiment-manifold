@@ -26,7 +26,8 @@ experiment:
   layers: [0]
   methods: [mean_diff, kmeans, logistic_regression, pca, das]
   openwebtext_resample_ablation: false
-  output_dir: outputs/smoke
+  output_dir: outputs/results/smoke
+  checkpoint_dir: checkpoints
   resume: true
 
 fitting:

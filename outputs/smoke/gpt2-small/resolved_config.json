@@ -1,0 +1,67 @@
+{
+  "das": {
+    "batch_size": 16,
+    "epochs": 1,
+    "implementation": "tigges_rotation",
+    "learning_rate": 0.001,
+    "max_grad_norm": 1.0,
+    "weight_decay": 0.0
+  },
+  "data": {
+    "openwebtext_dataset": "stas/openwebtext-10k",
+    "openwebtext_max_samples": 8,
+    "openwebtext_random_seeds": [
+      1
+    ],
+    "openwebtext_sequence_length": 32,
+    "openwebtext_split": "train",
+    "sst_max_examples": 32,
+    "sst_max_pairs": 2,
+    "sst_root": "/Users/abdulhakeemadefioye/Desktop/neural-geometry/eliciting-latent-sentiment/stanfordSentimentTreebank",
+    "sst_split": "dev",
+    "toy_config": "/Users/abdulhakeemadefioye/Desktop/neural-geometry/sentiment-manifold/data/toy_movie_review.yaml"
+  },
+  "experiment": {
+    "evaluate_openwebtext": false,
+    "layers": [
+      0
+    ],
+    "methods": [
+      "mean_diff",
+      "kmeans",
+      "logistic_regression",
+      "pca",
+      "das"
+    ],
+    "openwebtext_resample_ablation": false,
+    "output_dir": "/Users/abdulhakeemadefioye/Desktop/neural-geometry/sentiment-manifold/outputs/smoke",
+    "resume": true,
+    "selection_metric": "sst_patch_recovery"
+  },
+  "model": {
+    "batch_size": 16,
+    "device": "cpu",
+    "dtype": "float32",
+    "name": "gpt2-small",
+    "prepend_bos": true,
+    "revision": "607a30d783dfa663caf39e06633721c8d4cfcd7e"
+  },
+  "runtime": {
+    "bos_token_id": 50256,
+    "device": "cpu",
+    "dtype": "torch.float32",
+    "model_name": "gpt2",
+    "pad_token_id": 50256,
+    "padding_side": "right",
+    "prepend_bos": true,
+    "requested_revision": "607a30d783dfa663caf39e06633721c8d4cfcd7e",
+    "resolved_model_revision": "607a30d783dfa663caf39e06633721c8d4cfcd7e",
+    "resolved_tokenizer_revision": "607a30d783dfa663caf39e06633721c8d4cfcd7e",
+    "tokenizer_class": "GPT2Tokenizer",
+    "tokenizer_vocab_size": 50257,
+    "torch_version": "2.13.0",
+    "transformers_version": "5.14.1"
+  },
+  "seed": 0,
+  "source_path": "/Users/abdulhakeemadefioye/Desktop/neural-geometry/sentiment-manifold/configs/smoke.yaml"
+}

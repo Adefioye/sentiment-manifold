@@ -25,6 +25,7 @@ from .evaluation import evaluate_directional_patching, projection_accuracy
 from .evaluation.projections import projection_threshold
 from .experiment import ARTIFACT_SCHEMA_VERSION, run_reproduction
 from .models import CausalLMAdapter
+from .storage import checkpoint_variant_dir
 from .types import TextExample
 
 
@@ -225,14 +226,9 @@ def run_tuning(config: ReproductionConfig, method: str) -> Path:
         revision=config.model.revision,
         prepend_bos=config.model.prepend_bos,
     )
+    runtime = adapter.provenance()
     run_dir = Path(config.experiment.output_dir) / _slug(config.model.name) / method
     run_dir.mkdir(parents=True, exist_ok=True)
-    resolved = config.to_dict()
-    resolved["runtime"] = adapter.provenance()
-    resolved["tuned_method"] = method
-    (run_dir / "tuning_resolved_config.json").write_text(
-        json.dumps(resolved, indent=2, sort_keys=True)
-    )
 
     toy = load_toy_movie_review(config.data.toy_config).tokenizer_filtered(adapter.tokenizer)
     retained = [example for example in toy.train if adapter.focus_is_single_token(example)]
@@ -246,6 +242,35 @@ def run_tuning(config: ReproductionConfig, method: str) -> Path:
     if not fit_pairs or not validation_pairs:
         raise RuntimeError("Tuning split did not produce fit and validation counterfactual pairs")
     fit_ids = {example.example_id for example in fit_examples}
+    trial_checkpoint_dir = checkpoint_variant_dir(
+        config.experiment.checkpoint_dir,
+        model_name=config.model.name,
+        phase="tuning",
+        method=method,
+        fingerprint_payload={
+            "artifact_schema_version": ARTIFACT_SCHEMA_VERSION,
+            "hub_name": config.model.hub_name,
+            "model_revision": runtime["resolved_model_revision"],
+            "tokenizer_revision": runtime["resolved_tokenizer_revision"],
+            "prepend_bos": adapter.prepend_bos,
+            "fit_examples": [
+                {"example_id": example.example_id, "text": example.text, "label": example.label}
+                for example in fit_examples
+            ],
+            "validation_examples": [
+                {"example_id": example.example_id, "text": example.text, "label": example.label}
+                for example in validation_examples
+            ],
+        },
+    )
+    resolved = config.to_dict()
+    resolved["runtime"] = runtime
+    resolved["tuned_method"] = method
+    resolved["results_run_dir"] = str(run_dir)
+    resolved["trial_checkpoint_dir"] = str(trial_checkpoint_dir)
+    (run_dir / "tuning_resolved_config.json").write_text(
+        json.dumps(resolved, indent=2, sort_keys=True)
+    )
     split_rows = [
         {
             "example_id": example.example_id,
@@ -306,7 +331,7 @@ def run_tuning(config: ReproductionConfig, method: str) -> Path:
                     "seed": int(parameters["seed"]),
                 },
             )
-            artifact_path = run_dir / "trial_directions" / f"{trial_id}.npz"
+            artifact_path = trial_checkpoint_dir / f"{trial_id}.npz"
             artifact.save(artifact_path)
             validation = evaluate_directional_patching(
                 adapter,

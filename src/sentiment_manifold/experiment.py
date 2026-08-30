@@ -13,7 +13,7 @@ import pandas as pd
 import torch
 from tqdm.auto import tqdm
 
-from .artifacts import DirectionArtifact, artifact_path
+from .artifacts import DirectionArtifact
 from .config import ReproductionConfig
 from .data import (
     load_openwebtext,
@@ -33,6 +33,7 @@ from .evaluation import (
 from .evaluation.projections import projection_threshold
 from .models import CausalLMAdapter
 from .reporting import select_table1_best_layers
+from .storage import checkpoint_variant_dir
 
 
 SST_CLASSIFICATION_ANSWERS = {1: (" Positive",), 0: (" Negative",)}
@@ -262,10 +263,12 @@ def run_reproduction(config: ReproductionConfig) -> Path:
         revision=config.model.revision,
         prepend_bos=config.model.prepend_bos,
     )
+    runtime = adapter.provenance()
     run_dir = Path(config.experiment.output_dir) / _slug(config.model.name)
     run_dir.mkdir(parents=True, exist_ok=True)
     resolved = config.to_dict()
-    resolved["runtime"] = adapter.provenance()
+    resolved["runtime"] = runtime
+    resolved["results_run_dir"] = str(run_dir)
     sst_metadata_path = Path(config.data.sst_processed_dir) / "metadata.json"
     if sst_metadata_path.is_file():
         resolved["sst_preprocessing"] = json.loads(sst_metadata_path.read_text())
@@ -361,7 +364,29 @@ def run_reproduction(config: ReproductionConfig) -> Path:
         layer_directions: dict[str, np.ndarray] = {}
         for method in config.experiment.methods:
             fit_hyperparameters = _method_fit_hyperparameters(config, method, layer)
-            path = artifact_path(run_dir, method, layer)
+            checkpoint_dir = checkpoint_variant_dir(
+                config.experiment.checkpoint_dir,
+                model_name=config.model.name,
+                phase="reproduction",
+                method=method,
+                fingerprint_payload={
+                    "artifact_schema_version": ARTIFACT_SCHEMA_VERSION,
+                    "hub_name": config.model.hub_name,
+                    "model_revision": runtime["resolved_model_revision"],
+                    "tokenizer_revision": runtime["resolved_tokenizer_revision"],
+                    "prepend_bos": adapter.prepend_bos,
+                    "toy_train_examples": [
+                        {
+                            "example_id": example.example_id,
+                            "text": example.text,
+                            "label": example.label,
+                        }
+                        for example in toy_train
+                    ],
+                    "fit_hyperparameters": fit_hyperparameters,
+                },
+            )
+            path = checkpoint_dir / f"layer{layer:02d}.npz"
             if config.experiment.resume and path.exists():
                 artifact = DirectionArtifact.load(path)
                 if not _artifact_is_compatible(artifact, method, fit_hyperparameters):
@@ -414,8 +439,8 @@ def run_reproduction(config: ReproductionConfig) -> Path:
                     **result.diagnostics,
                     "artifact_schema_version": ARTIFACT_SCHEMA_VERSION,
                     "toy_train_examples": len(toy_train),
-                    "model_revision": adapter.provenance()["resolved_model_revision"],
-                    "tokenizer_revision": adapter.provenance()["resolved_tokenizer_revision"],
+                    "model_revision": runtime["resolved_model_revision"],
+                    "tokenizer_revision": runtime["resolved_tokenizer_revision"],
                     "prepend_bos": adapter.prepend_bos,
                     "fit_hyperparameters": fit_hyperparameters,
                 }

@@ -1,0 +1,6 @@
+model,method,layer,subspace_dimension,orientation_convention,orientation_reference,raw_orientation_dot,orientation_sign_flipped,artifact_path
+gpt2-small,mean_diff,0,1,negative_to_positive,toy_train_class_mean_difference,2.3983564641339097,False,/Users/abdulhakeemadefioye/Desktop/neural-geometry/sentiment-manifold/outputs/smoke/gpt2-small/directions/mean_diff_layer00.npz
+gpt2-small,kmeans,0,1,negative_to_positive,toy_train_class_mean_difference,2.3983564641339097,False,/Users/abdulhakeemadefioye/Desktop/neural-geometry/sentiment-manifold/outputs/smoke/gpt2-small/directions/kmeans_layer00.npz
+gpt2-small,logistic_regression,0,1,negative_to_positive,toy_train_class_mean_difference,4.949077168793853,False,/Users/abdulhakeemadefioye/Desktop/neural-geometry/sentiment-manifold/outputs/smoke/gpt2-small/directions/logistic_regression_layer00.npz
+gpt2-small,pca,0,1,negative_to_positive,toy_train_class_mean_difference,-1.4492098486409999,True,/Users/abdulhakeemadefioye/Desktop/neural-geometry/sentiment-manifold/outputs/smoke/gpt2-small/directions/pca_layer00.npz
+gpt2-small,das,0,1,negative_to_positive_first_basis_vector,toy_train_class_mean_difference,-0.08823196589946747,True,/Users/abdulhakeemadefioye/Desktop/neural-geometry/sentiment-manifold/outputs/smoke/gpt2-small/directions/das_layer00.npz

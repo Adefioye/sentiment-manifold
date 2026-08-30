@@ -20,7 +20,7 @@ line. It only fixes the reporting convention. For 2D/3D DAS the intervention dep
 not on the signs of individual basis columns. Every artifact records the convention and reference in
 `direction_metadata.csv`.
 
-The experiment runner fits every configured method at every configured boundary and writes portable compressed direction checkpoints. It reports:
+The experiment runner fits every configured method at every configured boundary and writes portable compressed direction checkpoints to a separate, model-scoped checkpoint root. Lightweight result tables and plots remain under the model-scoped result root. It reports:
 
 - ToyMovieReview held-out projection accuracy, patching recovery, and target-directed logit-flip
   percentage;
@@ -54,7 +54,7 @@ src/sentiment_manifold/
 ├── evaluation/    projections, causal patching, OWT ablation
 ├── experiment.py  configured all-layer sweep
 ├── plotting.py    causal curves, DAS loss curves, and similarity heatmaps
-└── storage.py     local/Colab/Drive output routing
+└── storage.py     separate local-result and persistent-checkpoint routing
 ```
 
 Notebooks call these APIs rather than defining separate experiment implementations. `AGENTS.md` and

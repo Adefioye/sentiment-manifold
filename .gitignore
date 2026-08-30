@@ -4,5 +4,8 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .ipynb_checkpoints/
-outputs/
+checkpoints/
+# Legacy checkpoint locations from runs created before checkpoint_dir existed.
+outputs/**/directions/
+outputs/**/trial_directions/
 data/processed/

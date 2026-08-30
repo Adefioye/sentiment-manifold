@@ -26,7 +26,8 @@ experiment:
   layers: all
   methods: [mean_diff, kmeans, logistic_regression, pca, das, das2d, das3d, random]
   openwebtext_resample_ablation: false
-  output_dir: outputs
+  output_dir: outputs/results
+  checkpoint_dir: checkpoints
   resume: true
 
 fitting:

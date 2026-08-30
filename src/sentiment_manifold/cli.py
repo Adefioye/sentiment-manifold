@@ -27,6 +27,8 @@ def _load_with_overrides(args) -> ReproductionConfig:
         config.model.device = args.device
     if getattr(args, "output_dir", None):
         config.experiment.output_dir = str(Path(args.output_dir).resolve())
+    if getattr(args, "checkpoint_dir", None):
+        config.experiment.checkpoint_dir = str(Path(args.checkpoint_dir).resolve())
     if getattr(args, "seed", None) is not None:
         config.seed = int(args.seed)
     methods = getattr(args, "method", None)
@@ -88,6 +90,7 @@ def main(argv: list[str] | None = None) -> None:
     reproduce.add_argument("--model", choices=["gpt2-small", "qwen-0.6b"], default=None)
     reproduce.add_argument("--device", choices=["auto", "cuda", "mps", "cpu"], default=None)
     reproduce.add_argument("--output-dir", default=None)
+    reproduce.add_argument("--checkpoint-dir", default=None)
     reproduce.add_argument("--seed", type=int, default=None)
     reproduce.add_argument(
         "--method",
@@ -128,6 +131,7 @@ def main(argv: list[str] | None = None) -> None:
     tune_parser.add_argument("--model", choices=["gpt2-small", "qwen-0.6b"], default=None)
     tune_parser.add_argument("--device", choices=["auto", "cuda", "mps", "cpu"], default=None)
     tune_parser.add_argument("--output-dir", default=None)
+    tune_parser.add_argument("--checkpoint-dir", default=None)
     tune_parser.add_argument("--seed", type=int, default=None)
     tune_parser.add_argument("--method", choices=TUNABLE_METHODS, required=True)
     tune_parser.add_argument(
@@ -147,6 +151,7 @@ def main(argv: list[str] | None = None) -> None:
     confirm_parser.add_argument("--model", choices=["gpt2-small", "qwen-0.6b"], default=None)
     confirm_parser.add_argument("--device", choices=["auto", "cuda", "mps", "cpu"], default=None)
     confirm_parser.add_argument("--output-dir", required=True)
+    confirm_parser.add_argument("--checkpoint-dir", default=None)
     confirm_parser.add_argument("--seed", type=int, default=None)
 
     preprocess = subparsers.add_parser(

@@ -15,7 +15,7 @@ pip install -e '.[dev,notebooks]'
 sentiment-manifold inspect-data --model gpt2-small
 sentiment-manifold preprocess-sst --binarization both
 sentiment-manifold reproduce --config configs/reproduction.yaml --model gpt2-small
-sentiment-manifold plot --run-dir outputs/gpt2-small
+sentiment-manifold plot --run-dir outputs/results/gpt2-small
 ```
 
 For the 28-layer Qwen3-0.6B base checkpoint, use `--model qwen-0.6b`. Use `--device auto`, `cuda`, `mps`, or `cpu`; automatic selection prefers CUDA, then MPS, then CPU.
@@ -99,6 +99,13 @@ Completed runs retain every per-layer measurement in `metrics.csv`. The paper-st
 `best_layers.csv` independently records the maximizing layer and value for logit difference and
 logit flip on both ToyMovieReview and SST; it does not force all four reported values to share one
 layer. The plotting command renders this summary as `figures/table1_best_results.png`.
+
+Results and reusable fitted directions have separate roots. By default, lightweight CSV/JSON/PNG
+results are written under `outputs/results/<model>/`, while direction checkpoints are written under
+`checkpoints/<model>/<phase>/<method>/<configuration>/`. Both roots are automatically separated by
+model, so GPT-2, Qwen, and later model runs do not collide. In Colab, keep results local and pass
+`--checkpoint-dir /content/drive/MyDrive/sentiment-manifold/checkpoints` to persist only fitted
+directions on Google Drive.
 
 ## Reproducibility boundary
 

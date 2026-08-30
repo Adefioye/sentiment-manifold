@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import os
 from pathlib import Path
 from typing import Any
 
@@ -64,7 +65,8 @@ class ExperimentConfig:
     # Compatibility with configurations created before the exploratory
     # diagnostic received its own explicit name.
     evaluate_openwebtext: bool = False
-    output_dir: str = "outputs"
+    output_dir: str = "outputs/results"
+    checkpoint_dir: str = "checkpoints"
     resume: bool = True
 
     @property
@@ -127,6 +129,10 @@ class ReproductionConfig:
         # still contain this key. Table 1 reporting now uses four fixed paper
         # metrics and intentionally ignores that legacy setting.
         experiment.pop("selection_metric", None)
+        if os.environ.get("SENTIMENT_MANIFOLD_OUTPUT_DIR"):
+            experiment["output_dir"] = os.environ["SENTIMENT_MANIFOLD_OUTPUT_DIR"]
+        if os.environ.get("SENTIMENT_MANIFOLD_CHECKPOINT_DIR"):
+            experiment["checkpoint_dir"] = os.environ["SENTIMENT_MANIFOLD_CHECKPOINT_DIR"]
         cfg = cls(
             seed=int(raw.get("seed", 0)),
             model=ModelConfig(**raw.get("model", {})),
@@ -145,9 +151,10 @@ class ReproductionConfig:
             value = Path(getattr(self.data, attribute))
             if not value.is_absolute():
                 setattr(self.data, attribute, str((project_root / value).resolve()))
-        output = Path(self.experiment.output_dir)
-        if not output.is_absolute():
-            self.experiment.output_dir = str((project_root / output).resolve())
+        for attribute in ("output_dir", "checkpoint_dir"):
+            value = Path(getattr(self.experiment, attribute))
+            if not value.is_absolute():
+                setattr(self.experiment, attribute, str((project_root / value).resolve()))
 
     def layers_for(self, n_layers: int) -> list[int]:
         if self.experiment.layers == "all":

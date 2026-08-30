@@ -46,7 +46,3 @@ class DirectionArtifact:
         with np.load(Path(path), allow_pickle=False) as data:
             metadata = json.loads(str(data["metadata"]))
             return cls(vector=data["vector"], **metadata)
-
-
-def artifact_path(root: str | Path, method: str, layer: int) -> Path:
-    return Path(root) / "directions" / f"{method}_layer{layer:02d}.npz"

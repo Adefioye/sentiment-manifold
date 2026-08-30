@@ -87,6 +87,8 @@ def test_reproduction_config_pins_gpt2_and_tigges_settings():
     assert config.fitting.kmeans_n_init == 10
     assert config.fitting.logistic_c == 1.0
     assert config.fitting.logistic_solver == "liblinear"
+    assert config.experiment.output_dir == str((PROJECT_ROOT / "outputs/results").resolve())
+    assert config.experiment.checkpoint_dir == str((PROJECT_ROOT / "checkpoints").resolve())
     assert config.experiment.methods == [
         "mean_diff",
         "kmeans",

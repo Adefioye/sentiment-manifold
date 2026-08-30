@@ -21,7 +21,8 @@ experiment:
   layers: all
   methods: [mean_diff]
   openwebtext_resample_ablation: false
-  output_dir: outputs/tuning
+  output_dir: outputs/results/tuning
+  checkpoint_dir: checkpoints
   resume: false
 
 fitting:

@@ -1,0 +1,6 @@
+model,method,layer,subspace_dimension,orientation_convention,orientation_reference,raw_orientation_dot,orientation_sign_flipped,artifact_path
+gpt2-small,mean_diff,0,1,negative_to_positive,toy_train_class_mean_difference,2.3983564641339106,False,/content/drive/MyDrive/sentiment-manifold/checkpoints/gpt2-small/reproduction/mean_diff/905042b50a3c366e/layer00.npz
+gpt2-small,kmeans,0,1,negative_to_positive,toy_train_class_mean_difference,2.3983564641339106,False,/content/drive/MyDrive/sentiment-manifold/checkpoints/gpt2-small/reproduction/kmeans/524c6d6fb0e240b2/layer00.npz
+gpt2-small,logistic_regression,0,1,negative_to_positive,toy_train_class_mean_difference,4.949077168793854,False,/content/drive/MyDrive/sentiment-manifold/checkpoints/gpt2-small/reproduction/logistic_regression/afccfd6565527fe3/layer00.npz
+gpt2-small,pca,0,1,negative_to_positive,toy_train_class_mean_difference,-1.4492093757914586,True,/content/drive/MyDrive/sentiment-manifold/checkpoints/gpt2-small/reproduction/pca/905042b50a3c366e/layer00.npz
+gpt2-small,das,0,1,negative_to_positive_first_basis_vector,toy_train_class_mean_difference,-0.6357186436653137,True,/content/drive/MyDrive/sentiment-manifold/checkpoints/gpt2-small/reproduction/das/e287bdf5e15ba887/layer00.npz

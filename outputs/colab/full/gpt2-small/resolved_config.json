@@ -1,0 +1,202 @@
+{
+  "das": {
+    "batch_size": 128,
+    "epochs": 64,
+    "implementation": "tigges_rotation",
+    "learning_rate": 0.001,
+    "max_grad_norm": 1.0,
+    "weight_decay": 0.0
+  },
+  "data": {
+    "openwebtext_dataset": "stas/openwebtext-10k",
+    "openwebtext_max_samples": 128,
+    "openwebtext_random_seeds": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "openwebtext_sequence_length": 128,
+    "openwebtext_split": "train",
+    "sst_dataset_config": "tigges_pythia_correct",
+    "sst_max_examples": null,
+    "sst_max_pairs": null,
+    "sst_processed_dir": "/content/sentiment-manifold/data/processed/sst-pythia-1.4b",
+    "sst_root": "/content/eliciting-latent-sentiment/stanfordSentimentTreebank",
+    "sst_split": "test",
+    "toy_config": "/content/sentiment-manifold/data/toy_movie_review.yaml"
+  },
+  "experiment": {
+    "checkpoint_dir": "/content/drive/MyDrive/sentiment-manifold/checkpoints",
+    "evaluate_openwebtext": false,
+    "layers": "all",
+    "methods": [
+      "mean_diff",
+      "kmeans",
+      "logistic_regression",
+      "pca",
+      "das",
+      "das2d",
+      "das3d",
+      "random"
+    ],
+    "openwebtext_resample_ablation": false,
+    "output_dir": "/content/sentiment-manifold/outputs/colab/full",
+    "resume": true
+  },
+  "fitting": {
+    "kmeans_n_init": 10,
+    "logistic_c": 1.0,
+    "logistic_max_iter": 1000,
+    "logistic_solver": "liblinear",
+    "logistic_tol": 0.0001
+  },
+  "model": {
+    "batch_size": 16,
+    "device": "cuda",
+    "dtype": "auto",
+    "name": "gpt2-small",
+    "prepend_bos": true,
+    "revision": "607a30d783dfa663caf39e06633721c8d4cfcd7e"
+  },
+  "results_run_dir": "/content/sentiment-manifold/outputs/colab/full/gpt2-small",
+  "runtime": {
+    "bos_token_id": 50256,
+    "device": "cuda",
+    "dtype": "torch.bfloat16",
+    "model_name": "gpt2",
+    "pad_token_id": 50256,
+    "padding_side": "right",
+    "prepend_bos": true,
+    "requested_revision": "607a30d783dfa663caf39e06633721c8d4cfcd7e",
+    "resolved_model_revision": "607a30d783dfa663caf39e06633721c8d4cfcd7e",
+    "resolved_tokenizer_revision": "607a30d783dfa663caf39e06633721c8d4cfcd7e",
+    "tokenizer_class": "GPT2TokenizerFast",
+    "tokenizer_vocab_size": 50257,
+    "torch_version": "2.11.0+cu128",
+    "transformers_version": "4.57.6"
+  },
+  "seed": 0,
+  "source_path": "/content/sentiment-manifold/configs/reproduction.yaml",
+  "sst_preprocessing": {
+    "binary_collapse": {
+      "neutral_removed": {
+        "negative": "score <= 0.4",
+        "neutral_removed": "0.4 < score <= 0.6",
+        "positive": "score > 0.6"
+      },
+      "tigges": {
+        "negative": "score <= 0.5",
+        "positive": "score > 0.5",
+        "upstream_equivalent": "int(round(score))"
+      }
+    },
+    "counts": {
+      "source_sentences": 10929,
+      "variants": {
+        "neutral_removed": {
+          "binarized": {
+            "test": 1692,
+            "train": 6368,
+            "validation": 797
+          },
+          "directed_pairs": 406,
+          "matched_pairs": 203,
+          "pythia_correct_test": 1068,
+          "pythia_incorrect_test": 624,
+          "pythia_scored_test": 1692
+        },
+        "tigges": {
+          "binarized": {
+            "test": 2058,
+            "train": 7864,
+            "validation": 1007
+          },
+          "directed_pairs": 438,
+          "matched_pairs": 219,
+          "pythia_correct_test": 1236,
+          "pythia_incorrect_test": 822,
+          "pythia_scored_test": 2058
+        }
+      }
+    },
+    "dataset_configs": [
+      "tigges_binarized",
+      "tigges_pythia_scored",
+      "tigges_pythia_correct",
+      "tigges_matched_pairs",
+      "tigges_directed_pairs",
+      "neutral_removed_binarized",
+      "neutral_removed_pythia_scored",
+      "neutral_removed_pythia_correct",
+      "neutral_removed_matched_pairs",
+      "neutral_removed_directed_pairs"
+    ],
+    "device": "cuda",
+    "dtype": "torch.bfloat16",
+    "hub_repo_id": "kokolamba/sentiment-manifold-sst-pythia-1.4b",
+    "model_name": "EleutherAI/pythia-1.4b",
+    "negative_answer": " Negative",
+    "negative_token_id": 32725,
+    "pairing": "maximal deterministic non-reused opposite-label matches by equal raw and prompt Pythia token counts",
+    "positive_answer": " Positive",
+    "positive_token_id": 29071,
+    "prepend_bos": true,
+    "requested_binarization": "both",
+    "requested_revision": null,
+    "resolved_model_revision": "fedc38a16eea3bd36a96b906d78d11d2ce18ed79",
+    "resolved_tokenizer_revision": null,
+    "scaffold_template": "Review Text: {text} Review Sentiment:",
+    "source_files_sha256": {
+      "datasetSentences.txt": "7d39f6b0742c2e7479bf96ebb7129588b5942d5f9e7a2c23f6456bd46b31fb49",
+      "datasetSentences_fixed.txt": "7d39f6b0742c2e7479bf96ebb7129588b5942d5f9e7a2c23f6456bd46b31fb49",
+      "datasetSplit.txt": "ad567db10ae5275963f1ac3dd5ec21214b1d688c7aab582e2616ef4b3f970a5a",
+      "dictionary.txt": "8da840d32a21b453da7100ee1799b0c46ac68d4d2b727948ec29a683d464b20d",
+      "dictionary_fixed.txt": "c8f7a57c197aa79a91392d39f82de4ff84ee532d5b260b63c070746324ae075f",
+      "sentiment_labels.txt": "20cbb150106bf334304a6f2076644eb7e1d8e17c7cd3d2d347e72bcaa2b4d322"
+    },
+    "source_rows": "datasetSentences_fixed.txt joined to dictionary_fixed.txt and sentiment_labels.txt",
+    "split_mapping": {
+      "1": "train",
+      "2": "test",
+      "3": "validation"
+    },
+    "sst_root": "/content/eliciting-latent-sentiment/stanfordSentimentTreebank"
+  },
+  "tuning": {
+    "das_batch_size": [
+      128
+    ],
+    "das_epochs": [
+      32,
+      64
+    ],
+    "das_learning_rate": [
+      0.0003,
+      0.001
+    ],
+    "das_max_grad_norm": [
+      1.0
+    ],
+    "das_weight_decay": [
+      0.0
+    ],
+    "kmeans_n_init": [
+      10,
+      50
+    ],
+    "logistic_c": [
+      0.01,
+      0.1,
+      1.0,
+      10.0
+    ],
+    "seeds": [
+      0,
+      1,
+      2
+    ],
+    "selection_metric": "toy_validation_logit_diff_percent",
+    "validation_fraction": 0.25
+  }
+}

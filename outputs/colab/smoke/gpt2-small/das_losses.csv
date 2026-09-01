@@ -1,0 +1,2 @@
+model,method,layer,subspace_dimension,seed,epochs,learning_rate,batch_size,epoch,evaluation_loss,train_loss
+gpt2-small,das,0,1,0,1,0.001,16,0,0.9137266675631205,0.9828249216079712

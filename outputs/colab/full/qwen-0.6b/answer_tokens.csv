@@ -1,0 +1,13 @@
+dataset,label,pair_index,answer,answer_repr,token_id
+toy_movie_review,1,0, great,' great',2244
+toy_movie_review,1,1, amazing,' amazing',7897
+toy_movie_review,1,2, awesome,' awesome',12456
+toy_movie_review,1,3, good,' good',1661
+toy_movie_review,1,4, perfect,' perfect',4727
+toy_movie_review,0,0, terrible,' terrible',17478
+toy_movie_review,0,1, awful,' awful',24607
+toy_movie_review,0,2, bad,' bad',3873
+toy_movie_review,0,3, horrible,' horrible',27102
+toy_movie_review,0,4, disgusting,' disgusting',53666
+sst_classification,1,0, Positive,' Positive',43903
+sst_classification,0,0, Negative,' Negative',50857

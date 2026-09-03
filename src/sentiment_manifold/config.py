@@ -13,6 +13,8 @@ import yaml
 MODEL_ALIASES = {
     "gpt2-small": "gpt2",
     "qwen-0.6b": "Qwen/Qwen3-0.6B-Base",
+    "gemma-2b": "google/gemma-2b",
+    "pythia-1.4b": "EleutherAI/pythia-1.4b",
 }
 
 

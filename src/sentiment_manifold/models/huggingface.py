@@ -33,7 +33,7 @@ class TokenizedBatch:
 
 
 class CausalLMAdapter:
-    """Expose layer boundaries 0..n_layers for GPT-2 and Qwen-style models."""
+    """Expose residual boundaries for GPT-2, Llama/Gemma, and GPT-NeoX models."""
 
     def __init__(
         self,
@@ -115,8 +115,11 @@ class CausalLMAdapter:
             return model.transformer.h, model.transformer.ln_f
         if hasattr(model, "model") and hasattr(model.model, "layers"):
             return model.model.layers, model.model.norm
+        if hasattr(model, "gpt_neox") and hasattr(model.gpt_neox, "layers"):
+            return model.gpt_neox.layers, model.gpt_neox.final_layer_norm
         raise TypeError(
-            f"Unsupported model architecture {type(model).__name__}; expected GPT-2 or Qwen/Llama layout"
+            f"Unsupported model architecture {type(model).__name__}; expected GPT-2, "
+            "Qwen/Llama/Gemma, or GPT-NeoX layout"
         )
 
     def tokenize(self, examples: Sequence[TextExample] | Sequence[str]) -> TokenizedBatch:

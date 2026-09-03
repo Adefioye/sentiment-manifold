@@ -1,4 +1,4 @@
-from sentiment_manifold.data.sst_preprocessing import (
+from sentiment_manifold.data.preprocessing.sst import (
     NEUTRAL_REMOVED_BINARIZATION,
     TIGGES_BINARIZATION,
     apply_labels_to_scored_rows,
@@ -12,8 +12,22 @@ from sentiment_manifold.data.sst_preprocessing import (
 from sentiment_manifold.cli import _token_from_environment
 
 
+class _WhitespaceTokenizer:
+    bos_token_id = 99
+    init_kwargs = {"_commit_hash": "fake-tokenizer-revision"}
+
+    def __len__(self):
+        return 100
+
+    def __call__(self, text, *, add_special_tokens=False):
+        ids = list(range(len(text.split())))
+        if add_special_tokens:
+            ids = [98, *ids]
+        return {"input_ids": ids}
+
+
 def test_publish_requires_explicit_token():
-    from sentiment_manifold.data.sst_preprocessing import publish_dataset_configs
+    from sentiment_manifold.data.preprocessing.sst import publish_dataset_configs
 
     try:
         publish_dataset_configs({}, repo_id="example/repo", private=True, card_text="", token="")
@@ -101,7 +115,7 @@ def test_shared_pythia_scores_are_relabelled_and_refiltered_per_variant():
 
 
 def test_preprocess_saves_complete_config_family_for_both_methods(tmp_path, monkeypatch):
-    import sentiment_manifold.data.sst_preprocessing as module
+    import sentiment_manifold.data.preprocessing.sst as module
 
     source_rows = []
     for index, score in enumerate((0.4, 0.5, 0.6, 0.8), start=1):
@@ -141,7 +155,12 @@ def test_preprocess_saves_complete_config_family_for_both_methods(tmp_path, monk
 
     monkeypatch.setattr(module, "load_sst_source_sentences", lambda _root: source_rows)
     monkeypatch.setattr(module, "score_test_sentences_with_pythia", fake_score)
-    result = module.preprocess_sst(sst_root=tmp_path, output_dir=tmp_path / "processed")
+    result = module.preprocess_sst(
+        sst_root=tmp_path,
+        output_dir=tmp_path / "processed",
+        pairing_models=["gpt2-small"],
+        tokenizers={"gpt2-small": _WhitespaceTokenizer()},
+    )
     expected = {
         f"{method}_{stage}"
         for method in (TIGGES_BINARIZATION, NEUTRAL_REMOVED_BINARIZATION)
@@ -153,9 +172,21 @@ def test_preprocess_saves_complete_config_family_for_both_methods(tmp_path, monk
             "directed_pairs",
         )
     }
-    assert set(result.datasets) == expected
-    assert set(result.metadata["dataset_configs"]) == expected
-    assert all((result.output_dir / name).is_dir() for name in expected)
+    rq2_expected = {
+        f"{method}_{stage}"
+        for method in (TIGGES_BINARIZATION, NEUTRAL_REMOVED_BINARIZATION)
+        for stage in (
+            "pairing_candidates",
+            "gpt2_small_matched_pairs",
+            "gpt2_small_directed_pairs",
+            "common_matched_pairs",
+            "common_directed_pairs",
+        )
+    }
+    assert set(result.datasets) == expected | rq2_expected
+    assert set(result.metadata["dataset_configs"]) == expected | rq2_expected
+    assert all((result.output_dir / name).is_dir() for name in expected | rq2_expected)
+    assert result.metadata["pairing_models"] == ["gpt2-small"]
 
 
 def test_matches_are_maximal_non_reused_opposite_and_equal_length():

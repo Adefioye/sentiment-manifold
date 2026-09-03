@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from hashlib import sha256
 import json
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping, Sequence
 
 from datasets import Dataset, DatasetDict
 from huggingface_hub import HfApi
@@ -20,7 +20,13 @@ import torch
 from tqdm.auto import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from ..devices import resolve_device
+from ...devices import resolve_device
+from .common import (
+    annotate_token_lengths,
+    build_pairing_configs,
+    parse_revision_overrides,
+    resolve_pairing_models,
+)
 
 
 PYTHIA_MODEL = "EleutherAI/pythia-1.4b"
@@ -441,10 +447,11 @@ Each variant has `*_binarized`, `*_pythia_scored`, `*_pythia_correct`, `*_matche
 and `*_directed_pairs` configurations. When both variants are requested, Pythia is scored once on
 all Tigges-binarized test rows and correctness is computed independently for each label policy.
 
-No GPT-4 labels or manual pair validation are used. Matches are opposite according to SST's human labels;
-they are not minimal semantic rewrites. Downstream GPT-2 and Qwen experiments should re-pair
-the relevant `*_pythia_correct` configuration using the target tokenizer because tokenizer lengths
-differ between model families.
+No GPT-4 labels or manual pair validation are used. Matches are opposite according to SST's human
+labels; they are not minimal semantic rewrites. The legacy pair configurations preserve the
+paper-oriented Pythia pairing. RQ2 additionally writes `*_pairing_candidates`, tokenizer-specific
+pairs for GPT-2, Qwen, Gemma, and Pythia when selected, and `*_common_*` pairs whose full prompts
+have equal length under every selected tokenizer.
 
 ## Counts
 
@@ -480,6 +487,7 @@ def publish_dataset_configs(
         account = api.whoami()["name"]
         repo_id = f"{account}/sentiment-manifold-sst-pythia-1.4b"
     api.create_repo(repo_id=repo_id, repo_type="dataset", private=private, exist_ok=True)
+    api.update_repo_settings(repo_id=repo_id, repo_type="dataset", private=private)
     for config_name, dataset_dict in datasets.items():
         dataset_dict.push_to_hub(
             repo_id,
@@ -506,10 +514,13 @@ def preprocess_sst(
     batch_size: int = 16,
     revision: str | None = None,
     binarization: str = "both",
+    pairing_models: Sequence[str] | None = None,
+    pairing_revisions: Sequence[str] | None = None,
     push_to_hub: bool = False,
     hub_repo_id: str | None = None,
     private: bool = True,
     hf_token: str | None = None,
+    tokenizers: Mapping[str, Any] | None = None,
 ) -> SSTPreprocessingResult:
     """Run, save, and optionally publish the complete SST preprocessing pipeline."""
     if push_to_hub:
@@ -550,9 +561,12 @@ def preprocess_sst(
         batch_size=batch_size,
         revision=revision,
     )
+    pairing_specs = resolve_pairing_models(pairing_models)
+    parsed_pairing_revisions = parse_revision_overrides(pairing_revisions)
 
     datasets: dict[str, DatasetDict] = {}
     variant_counts: dict[str, Any] = {}
+    pairing_tokenizer_metadata: dict[str, Any] = {}
     for method, binarized in variants.items():
         scored = apply_labels_to_scored_rows(shared_scored, binarized)
         correct = [row for row in scored if row["pythia_correct"]]
@@ -560,6 +574,19 @@ def preprocess_sst(
             raise AssertionError("Pythia-correct SST configuration contains an incorrect row")
         matches = make_maximal_matches(correct)
         directed = make_directed_pairs(matches)
+        pairing_candidates, pairing_tokenizer_metadata = annotate_token_lengths(
+            correct,
+            specs=pairing_specs,
+            prompt_template=SCAFFOLD_TEMPLATE,
+            revisions=parsed_pairing_revisions,
+            tokenizers=tokenizers,
+        )
+        pairing_configs, pairing_counts = build_pairing_configs(
+            pairing_candidates,
+            dataset_name=f"sst-{method}",
+            specs=pairing_specs,
+            splits=("test",),
+        )
         datasets.update(
             {
                 f"{method}_binarized": _dataset_dict_by_split(binarized),
@@ -567,6 +594,7 @@ def preprocess_sst(
                 f"{method}_pythia_correct": _single_test_dataset(correct),
                 f"{method}_matched_pairs": _single_test_dataset(matches),
                 f"{method}_directed_pairs": _single_test_dataset(directed),
+                **{f"{method}_{name}": value for name, value in pairing_configs.items()},
             }
         )
         variant_counts[method] = {
@@ -579,6 +607,7 @@ def preprocess_sst(
             "pythia_incorrect_test": len(scored) - len(correct),
             "matched_pairs": len(matches),
             "directed_pairs": len(directed),
+            "tokenizer_specific_pairing": pairing_counts,
         }
     for config_name, dataset_dict in datasets.items():
         dataset_dict.save_to_disk(output_dir / config_name)
@@ -618,6 +647,8 @@ def preprocess_sst(
         },
         "dataset_configs": list(datasets),
         "requested_binarization": binarization,
+        "pairing_models": [spec.alias for spec in pairing_specs],
+        "pairing_tokenizers": pairing_tokenizer_metadata,
         "pairing": (
             "maximal deterministic non-reused opposite-label matches by equal raw and prompt "
             "Pythia token counts"

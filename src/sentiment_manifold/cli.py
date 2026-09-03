@@ -7,14 +7,79 @@ import json
 import os
 from pathlib import Path
 
-from .config import ReproductionConfig
-from .data import load_toy_movie_review, preprocess_sst
+from .config import MODEL_ALIASES, ReproductionConfig
+from .data import (
+    load_toy_movie_review,
+    preprocess_ait,
+    preprocess_dynasent,
+    preprocess_imdb,
+    preprocess_sst,
+)
+from .data.preprocessing.common import DEFAULT_PROMPT_TEMPLATE, PAIRING_MODEL_SPECS
 from .devices import resolve_device
 from .directions import list_fitters
 from .experiment import run_reproduction
 from .models import CausalLMAdapter
 from .plotting import plot_run
 from .tuning import TUNABLE_METHODS, run_confirmation, run_tuning
+
+
+MODEL_CHOICES = tuple(MODEL_ALIASES)
+
+
+def _add_pairing_arguments(
+    parser: argparse.ArgumentParser, *, include_prompt_template: bool = True
+) -> None:
+    parser.add_argument(
+        "--pairing-model",
+        action="append",
+        choices=["all", *PAIRING_MODEL_SPECS],
+        help=(
+            "tokenizer used to build equal-full-prompt-length pairs; repeat for several "
+            "models (default: all four)"
+        ),
+    )
+    parser.add_argument(
+        "--pairing-revision",
+        action="append",
+        default=None,
+        metavar="MODEL=REVISION",
+        help="optional immutable tokenizer revision; repeat per model",
+    )
+    if include_prompt_template:
+        parser.add_argument(
+            "--prompt-template",
+            default=DEFAULT_PROMPT_TEMPLATE,
+            help="prompt scaffold containing the literal placeholder {text}",
+        )
+
+
+def _add_publish_arguments(parser: argparse.ArgumentParser, default_repo: str) -> None:
+    parser.add_argument("--push-to-hub", action="store_true")
+    parser.add_argument(
+        "--hub-repo-id",
+        default=None,
+        help=f"defaults to <authenticated-user>/{default_repo}",
+    )
+    parser.add_argument(
+        "--hf-token-env",
+        default="HF_TOKEN",
+        help="environment variable containing the Hub token; the token is never logged",
+    )
+    visibility = parser.add_mutually_exclusive_group()
+    visibility.add_argument(
+        "--public",
+        action="store_true",
+        help="explicitly opt into a public dataset repository",
+    )
+    visibility.add_argument("--private", action="store_true", help="publish privately (default)")
+
+
+def _publish_token_or_error(parser: argparse.ArgumentParser, args) -> str | None:
+    token = _token_from_environment(args.hf_token_env) if args.push_to_hub else None
+    if args.push_to_hub and not token:
+        parser.error(f"--push-to-hub requires a token in {args.hf_token_env!r} or HF_TOKEN_PATH")
+    return token
 
 
 def _load_with_overrides(args) -> ReproductionConfig:
@@ -87,7 +152,7 @@ def main(argv: list[str] | None = None) -> None:
 
     reproduce = subparsers.add_parser("reproduce", help="fit and evaluate all configured layers")
     reproduce.add_argument("--config", default="configs/reproduction.yaml")
-    reproduce.add_argument("--model", choices=["gpt2-small", "qwen-0.6b"], default=None)
+    reproduce.add_argument("--model", choices=MODEL_CHOICES, default=None)
     reproduce.add_argument("--device", choices=["auto", "cuda", "mps", "cpu"], default=None)
     reproduce.add_argument("--output-dir", default=None)
     reproduce.add_argument("--checkpoint-dir", default=None)
@@ -128,7 +193,7 @@ def main(argv: list[str] | None = None) -> None:
         help="select one method's layer and hyperparameters on Toy training-validation only",
     )
     tune_parser.add_argument("--config", default="configs/tuning.yaml")
-    tune_parser.add_argument("--model", choices=["gpt2-small", "qwen-0.6b"], default=None)
+    tune_parser.add_argument("--model", choices=MODEL_CHOICES, default=None)
     tune_parser.add_argument("--device", choices=["auto", "cuda", "mps", "cpu"], default=None)
     tune_parser.add_argument("--output-dir", default=None)
     tune_parser.add_argument("--checkpoint-dir", default=None)
@@ -148,7 +213,7 @@ def main(argv: list[str] | None = None) -> None:
     confirm_parser.add_argument("--config", default="configs/reproduction.yaml")
     confirm_parser.add_argument("--selection", required=True)
     confirm_parser.add_argument("--method", choices=TUNABLE_METHODS, default=None)
-    confirm_parser.add_argument("--model", choices=["gpt2-small", "qwen-0.6b"], default=None)
+    confirm_parser.add_argument("--model", choices=MODEL_CHOICES, default=None)
     confirm_parser.add_argument("--device", choices=["auto", "cuda", "mps", "cpu"], default=None)
     confirm_parser.add_argument("--output-dir", required=True)
     confirm_parser.add_argument("--checkpoint-dir", default=None)
@@ -175,20 +240,64 @@ def main(argv: list[str] | None = None) -> None:
         default="both",
         help="save both label policies by default, or only the selected policy",
     )
-    preprocess.add_argument("--push-to-hub", action="store_true")
-    preprocess.add_argument(
-        "--hub-repo-id",
-        default=None,
-        help="defaults to <authenticated-user>/sentiment-manifold-sst-pythia-1.4b",
+    _add_pairing_arguments(preprocess, include_prompt_template=False)
+    _add_publish_arguments(preprocess, "sentiment-manifold-sst-pythia-1.4b")
+
+    ait = subparsers.add_parser(
+        "preprocess-ait",
+        help="build binary AIT Valence-oc datasets and equal-length prompt pairs",
     )
-    preprocess.add_argument(
-        "--hf-token-env",
-        default="HF_TOKEN",
-        help="environment variable containing the Hub token; the token is never logged",
+    ait.add_argument("--ait-root", default=None)
+    ait.add_argument("--train-file", default=None)
+    ait.add_argument("--validation-file", default=None)
+    ait.add_argument("--test-file", default=None)
+    ait.add_argument("--output-dir", default="data/processed/ait-valence-binary")
+    ait.add_argument(
+        "--pairing-split",
+        action="append",
+        choices=["train", "validation", "test"],
+        help="split to pair; repeat as needed (default: all labeled splits)",
     )
-    visibility = preprocess.add_mutually_exclusive_group()
-    visibility.add_argument("--public", action="store_true", help="publish a public dataset")
-    visibility.add_argument("--private", action="store_true", help="publish privately (default)")
+    _add_pairing_arguments(ait)
+    _add_publish_arguments(ait, "sentiment-manifold-ait-valence-binary")
+
+    imdb = subparsers.add_parser(
+        "preprocess-imdb",
+        help="build IMDb binary datasets and equal-length prompt pairs",
+    )
+    imdb.add_argument("--dataset-name", default="stanfordnlp/imdb")
+    imdb.add_argument("--dataset-revision", default=None)
+    imdb.add_argument("--output-dir", default="data/processed/imdb-binary")
+    imdb.add_argument(
+        "--pairing-split",
+        action="append",
+        choices=["train", "validation", "test"],
+        help="split to pair; repeat as needed (default: test)",
+    )
+    _add_pairing_arguments(imdb)
+    _add_publish_arguments(imdb, "sentiment-manifold-imdb-binary")
+
+    dynasent = subparsers.add_parser(
+        "preprocess-dynasent",
+        help="build DynaSent R1/R2 binary datasets and equal-length prompt pairs",
+    )
+    dynasent.add_argument("--dynasent-root", required=True)
+    dynasent.add_argument("--output-dir", default="data/processed/dynasent-r1-r2-binary")
+    dynasent.add_argument(
+        "--round",
+        action="append",
+        type=int,
+        choices=[1, 2],
+        help="round to include; repeat for both (default: both)",
+    )
+    dynasent.add_argument(
+        "--pairing-split",
+        action="append",
+        choices=["train", "validation", "test"],
+        help="split to pair; repeat as needed (default: test)",
+    )
+    _add_pairing_arguments(dynasent)
+    _add_publish_arguments(dynasent, "sentiment-manifold-dynasent-r1-r2-binary")
 
     args = parser.parse_args(argv)
     if args.command == "inspect-data":
@@ -238,11 +347,7 @@ def main(argv: list[str] | None = None) -> None:
         )
         print(f"Completed frozen confirmation: {run_dir}")
     elif args.command == "preprocess-sst":
-        hf_token = _token_from_environment(args.hf_token_env) if args.push_to_hub else None
-        if args.push_to_hub and not hf_token:
-            parser.error(
-                f"--push-to-hub requires a token in {args.hf_token_env!r} or HF_TOKEN_PATH"
-            )
+        hf_token = _publish_token_or_error(parser, args)
         result = preprocess_sst(
             sst_root=args.sst_root,
             output_dir=args.output_dir,
@@ -251,12 +356,82 @@ def main(argv: list[str] | None = None) -> None:
             batch_size=args.batch_size,
             revision=args.revision,
             binarization=args.binarization,
+            pairing_models=args.pairing_model,
+            pairing_revisions=args.pairing_revision,
             push_to_hub=args.push_to_hub,
             hub_repo_id=args.hub_repo_id,
             private=not args.public,
             hf_token=hf_token,
         )
         print(f"Saved SST datasets: {result.output_dir}")
+        print(json.dumps(result.metadata["counts"], indent=2, sort_keys=True))
+        if result.hub_repo_id:
+            print(f"Published dataset: https://huggingface.co/datasets/{result.hub_repo_id}")
+    elif args.command == "preprocess-ait":
+        hf_token = _publish_token_or_error(parser, args)
+        explicit_files = {
+            split: path
+            for split, path in (
+                ("train", args.train_file),
+                ("validation", args.validation_file),
+                ("test", args.test_file),
+            )
+            if path
+        }
+        if explicit_files and len(explicit_files) != 3:
+            parser.error("provide all three AIT split files, or use --ait-root for discovery")
+        result = preprocess_ait(
+            ait_root=args.ait_root,
+            files=explicit_files or None,
+            output_dir=args.output_dir,
+            pairing_models=args.pairing_model,
+            pairing_revisions=args.pairing_revision,
+            pairing_splits=args.pairing_split or ("train", "validation", "test"),
+            prompt_template=args.prompt_template,
+            push_to_hub=args.push_to_hub,
+            hub_repo_id=args.hub_repo_id,
+            private=not args.public,
+            hf_token=hf_token,
+        )
+        print(f"Saved AIT datasets: {result.output_dir}")
+        print(json.dumps(result.metadata["counts"], indent=2, sort_keys=True))
+        if result.hub_repo_id:
+            print(f"Published dataset: https://huggingface.co/datasets/{result.hub_repo_id}")
+    elif args.command == "preprocess-imdb":
+        hf_token = _publish_token_or_error(parser, args)
+        result = preprocess_imdb(
+            output_dir=args.output_dir,
+            dataset_name=args.dataset_name,
+            dataset_revision=args.dataset_revision,
+            pairing_models=args.pairing_model,
+            pairing_revisions=args.pairing_revision,
+            pairing_splits=args.pairing_split or ("test",),
+            prompt_template=args.prompt_template,
+            push_to_hub=args.push_to_hub,
+            hub_repo_id=args.hub_repo_id,
+            private=not args.public,
+            hf_token=hf_token,
+        )
+        print(f"Saved IMDb datasets: {result.output_dir}")
+        print(json.dumps(result.metadata["counts"], indent=2, sort_keys=True))
+        if result.hub_repo_id:
+            print(f"Published dataset: https://huggingface.co/datasets/{result.hub_repo_id}")
+    elif args.command == "preprocess-dynasent":
+        hf_token = _publish_token_or_error(parser, args)
+        result = preprocess_dynasent(
+            dynasent_root=args.dynasent_root,
+            output_dir=args.output_dir,
+            rounds=args.round or (1, 2),
+            pairing_models=args.pairing_model,
+            pairing_revisions=args.pairing_revision,
+            pairing_splits=args.pairing_split or ("test",),
+            prompt_template=args.prompt_template,
+            push_to_hub=args.push_to_hub,
+            hub_repo_id=args.hub_repo_id,
+            private=not args.public,
+            hf_token=hf_token,
+        )
+        print(f"Saved DynaSent datasets: {result.output_dir}")
         print(json.dumps(result.metadata["counts"], indent=2, sort_keys=True))
         if result.hub_repo_id:
             print(f"Published dataset: https://huggingface.co/datasets/{result.hub_repo_id}")

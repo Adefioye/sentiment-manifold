@@ -8,6 +8,10 @@ from typing import Any, Mapping, Sequence
 
 from datasets import DatasetDict, load_dataset
 
+from ...models.sentiment_filter import (
+    DEFAULT_PYTHIA_FILTER_MODEL,
+    score_binary_rows_with_pythia,
+)
 from .common import (
     DEFAULT_PROMPT_TEMPLATE,
     BinaryPreprocessingResult,
@@ -55,6 +59,11 @@ def preprocess_imdb(
     pairing_revisions: Sequence[str] | None = None,
     pairing_splits: Sequence[str] = ("test",),
     prompt_template: str = DEFAULT_PROMPT_TEMPLATE,
+    filter_model: str = DEFAULT_PYTHIA_FILTER_MODEL,
+    filter_revision: str | None = None,
+    device: str = "auto",
+    dtype: str = "auto",
+    batch_size: int = 16,
     push_to_hub: bool = False,
     hub_repo_id: str | None = None,
     private: bool = True,
@@ -66,10 +75,21 @@ def preprocess_imdb(
     if source is None:
         source = load_dataset(dataset_name, revision=dataset_revision)
     rows = imdb_rows(source)
+    scored, filter_metadata = score_binary_rows_with_pythia(
+        rows,
+        splits=pairing_splits,
+        prompt_template=prompt_template,
+        model_name=filter_model,
+        revision=filter_revision,
+        device=device,
+        dtype=dtype,
+        batch_size=batch_size,
+    )
+    correct = [row for row in scored if bool(row["pythia_correct"])]
     specs = resolve_pairing_models(pairing_models)
     revisions = parse_revision_overrides(pairing_revisions)
     annotated, tokenizer_metadata = annotate_token_lengths(
-        rows,
+        correct,
         specs=specs,
         prompt_template=prompt_template,
         revisions=revisions,
@@ -81,18 +101,27 @@ def preprocess_imdb(
         specs=specs,
         splits=pairing_splits,
     )
-    datasets = {"binary": dataset_dict_by_split(rows), **pairing_configs}
+    datasets = {
+        "binary": dataset_dict_by_split(rows),
+        "pythia_scored": dataset_dict_by_split(scored),
+        "pythia_correct": dataset_dict_by_split(correct),
+        **pairing_configs,
+    }
     metadata = {
         "dataset": dataset_name,
         "requested_dataset_revision": dataset_revision,
         "label_policy": {"negative": 0, "positive": 1},
         "text_policy": "source review text retained verbatim",
+        "correctness_filter": filter_metadata,
         "prompt_template": prompt_template,
         "pairing_splits": list(pairing_splits),
         "pairing_models": [spec.alias for spec in specs],
         "tokenizers": tokenizer_metadata,
         "counts": {
             "binary_rows": len(rows),
+            "pythia_scored_rows": len(scored),
+            "pythia_correct_rows": len(correct),
+            "pythia_incorrect_rows": len(scored) - len(correct),
             "by_split": {
                 split: sum(row["split"] == split for row in rows)
                 for split in ("train", "validation", "test")
@@ -107,7 +136,9 @@ def preprocess_imdb(
         metadata=metadata,
         push_to_hub=push_to_hub,
         hub_repo_id=hub_repo_id,
-        default_repo_name="sentiment-manifold-imdb-binary",
+        default_repo_name=(
+            f"sentiment-manifold-imdb-{filter_metadata['filter_model_alias']}"
+        ),
         private=private,
         hf_token=hf_token,
     )

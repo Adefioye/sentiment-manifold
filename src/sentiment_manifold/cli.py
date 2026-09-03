@@ -19,7 +19,11 @@ from .data.preprocessing.common import DEFAULT_PROMPT_TEMPLATE, PAIRING_MODEL_SP
 from .devices import resolve_device
 from .directions import list_fitters
 from .experiment import run_reproduction
-from .models import CausalLMAdapter
+from .models import (
+    CausalLMAdapter,
+    DEFAULT_PYTHIA_FILTER_MODEL,
+    PYTHIA_FILTER_MODELS,
+)
 from .plotting import plot_run
 from .tuning import TUNABLE_METHODS, run_confirmation, run_tuning
 
@@ -73,6 +77,29 @@ def _add_publish_arguments(parser: argparse.ArgumentParser, default_repo: str) -
         help="explicitly opt into a public dataset repository",
     )
     visibility.add_argument("--private", action="store_true", help="publish privately (default)")
+
+
+def _add_correctness_filter_arguments(
+    parser: argparse.ArgumentParser, *, revision_alias: bool = False
+) -> None:
+    parser.add_argument(
+        "--filter-model",
+        choices=list(PYTHIA_FILTER_MODELS),
+        default=DEFAULT_PYTHIA_FILTER_MODEL,
+        help="Pythia model used for zero-shot correctness selection (default: pythia-2.8b)",
+    )
+    revision_flags = ("--filter-revision", "--revision") if revision_alias else ("--filter-revision",)
+    parser.add_argument(
+        *revision_flags,
+        dest="filter_revision",
+        default=None,
+        help="optional immutable revision of the Pythia correctness-filter model",
+    )
+    parser.add_argument("--device", choices=["auto", "cuda", "mps", "cpu"], default="auto")
+    parser.add_argument(
+        "--dtype", choices=["auto", "float32", "float16", "bfloat16"], default="auto"
+    )
+    parser.add_argument("--batch-size", type=int, default=16)
 
 
 def _publish_token_or_error(parser: argparse.ArgumentParser, args) -> str | None:
@@ -221,19 +248,14 @@ def main(argv: list[str] | None = None) -> None:
 
     preprocess = subparsers.add_parser(
         "preprocess-sst",
-        help="build Pythia-1.4B-filtered SST datasets and optionally publish them",
+        help="build Pythia-correctness-filtered SST datasets and optionally publish them",
     )
     preprocess.add_argument(
         "--sst-root",
         default="../eliciting-latent-sentiment/stanfordSentimentTreebank",
     )
-    preprocess.add_argument("--output-dir", default="data/processed/sst-pythia-1.4b")
-    preprocess.add_argument("--device", choices=["auto", "cuda", "mps", "cpu"], default="auto")
-    preprocess.add_argument(
-        "--dtype", choices=["auto", "float32", "float16", "bfloat16"], default="auto"
-    )
-    preprocess.add_argument("--batch-size", type=int, default=16)
-    preprocess.add_argument("--revision", default=None)
+    preprocess.add_argument("--output-dir", default="data/processed/sst-pythia-2.8b")
+    _add_correctness_filter_arguments(preprocess, revision_alias=True)
     preprocess.add_argument(
         "--binarization",
         choices=["both", "tigges", "neutral_removed"],
@@ -241,7 +263,7 @@ def main(argv: list[str] | None = None) -> None:
         help="save both label policies by default, or only the selected policy",
     )
     _add_pairing_arguments(preprocess, include_prompt_template=False)
-    _add_publish_arguments(preprocess, "sentiment-manifold-sst-pythia-1.4b")
+    _add_publish_arguments(preprocess, "sentiment-manifold-sst-pythia-2.8b")
 
     ait = subparsers.add_parser(
         "preprocess-ait",
@@ -267,7 +289,8 @@ def main(argv: list[str] | None = None) -> None:
     )
     imdb.add_argument("--dataset-name", default="stanfordnlp/imdb")
     imdb.add_argument("--dataset-revision", default=None)
-    imdb.add_argument("--output-dir", default="data/processed/imdb-binary")
+    imdb.add_argument("--output-dir", default="data/processed/imdb-pythia-2.8b")
+    _add_correctness_filter_arguments(imdb)
     imdb.add_argument(
         "--pairing-split",
         action="append",
@@ -275,14 +298,17 @@ def main(argv: list[str] | None = None) -> None:
         help="split to pair; repeat as needed (default: test)",
     )
     _add_pairing_arguments(imdb)
-    _add_publish_arguments(imdb, "sentiment-manifold-imdb-binary")
+    _add_publish_arguments(imdb, "sentiment-manifold-imdb-pythia-2.8b")
 
     dynasent = subparsers.add_parser(
         "preprocess-dynasent",
         help="build DynaSent R1/R2 binary datasets and equal-length prompt pairs",
     )
     dynasent.add_argument("--dynasent-root", required=True)
-    dynasent.add_argument("--output-dir", default="data/processed/dynasent-r1-r2-binary")
+    dynasent.add_argument(
+        "--output-dir", default="data/processed/dynasent-r1-r2-pythia-2.8b"
+    )
+    _add_correctness_filter_arguments(dynasent)
     dynasent.add_argument(
         "--round",
         action="append",
@@ -297,7 +323,7 @@ def main(argv: list[str] | None = None) -> None:
         help="split to pair; repeat as needed (default: test)",
     )
     _add_pairing_arguments(dynasent)
-    _add_publish_arguments(dynasent, "sentiment-manifold-dynasent-r1-r2-binary")
+    _add_publish_arguments(dynasent, "sentiment-manifold-dynasent-r1-r2-pythia-2.8b")
 
     args = parser.parse_args(argv)
     if args.command == "inspect-data":
@@ -354,7 +380,8 @@ def main(argv: list[str] | None = None) -> None:
             device=args.device,
             dtype=args.dtype,
             batch_size=args.batch_size,
-            revision=args.revision,
+            filter_revision=args.filter_revision,
+            filter_model=args.filter_model,
             binarization=args.binarization,
             pairing_models=args.pairing_model,
             pairing_revisions=args.pairing_revision,
@@ -407,6 +434,11 @@ def main(argv: list[str] | None = None) -> None:
             pairing_revisions=args.pairing_revision,
             pairing_splits=args.pairing_split or ("test",),
             prompt_template=args.prompt_template,
+            filter_model=args.filter_model,
+            filter_revision=args.filter_revision,
+            device=args.device,
+            dtype=args.dtype,
+            batch_size=args.batch_size,
             push_to_hub=args.push_to_hub,
             hub_repo_id=args.hub_repo_id,
             private=not args.public,
@@ -426,6 +458,11 @@ def main(argv: list[str] | None = None) -> None:
             pairing_revisions=args.pairing_revision,
             pairing_splits=args.pairing_split or ("test",),
             prompt_template=args.prompt_template,
+            filter_model=args.filter_model,
+            filter_revision=args.filter_revision,
+            device=args.device,
+            dtype=args.dtype,
+            batch_size=args.batch_size,
             push_to_hub=args.push_to_hub,
             hub_repo_id=args.hub_repo_id,
             private=not args.public,

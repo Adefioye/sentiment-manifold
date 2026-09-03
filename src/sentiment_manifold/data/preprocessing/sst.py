@@ -1,4 +1,4 @@
-"""Paper-grounded SST preprocessing with Pythia-1.4B.
+"""Paper-grounded SST preprocessing with a configurable Pythia correctness filter.
 
 This module adapts ``eliciting-latent-sentiment/utils/treebank.py`` while making
 the intermediate datasets explicit and correcting the clean/corrupt pairing to
@@ -16,11 +16,13 @@ from typing import Any, Iterable, Mapping, Sequence
 
 from datasets import Dataset, DatasetDict
 from huggingface_hub import HfApi
-import torch
-from tqdm.auto import tqdm
-from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from ...devices import resolve_device
+from ...models.sentiment_filter import (
+    DEFAULT_PYTHIA_FILTER_MODEL,
+    NEGATIVE_ANSWER,
+    POSITIVE_ANSWER,
+    score_binary_rows_with_pythia,
+)
 from .common import (
     annotate_token_lengths,
     build_pairing_configs,
@@ -29,9 +31,6 @@ from .common import (
 )
 
 
-PYTHIA_MODEL = "EleutherAI/pythia-1.4b"
-POSITIVE_ANSWER = " Positive"
-NEGATIVE_ANSWER = " Negative"
 NEUTRAL_LOWER = 0.4
 NEUTRAL_UPPER = 0.6
 SCAFFOLD_TEMPLATE = "Review Text: {text} Review Sentiment:"
@@ -206,108 +205,26 @@ def apply_labels_to_scored_rows(
     return result
 
 
-def _single_token_id(tokenizer, text: str) -> int:
-    token_ids = tokenizer(text, add_special_tokens=False)["input_ids"]
-    if len(token_ids) != 1:
-        raise ValueError(f"Expected {text!r} to be one Pythia token, got {token_ids}")
-    return int(token_ids[0])
-
-
-def _token_ids(tokenizer, text: str) -> list[int]:
-    ids = list(tokenizer(text, add_special_tokens=False)["input_ids"])
-    bos_token_id = tokenizer.bos_token_id
-    if bos_token_id is None:
-        bos_token_id = tokenizer.eos_token_id
-    if bos_token_id is None:
-        raise ValueError("Pythia tokenizer has neither a BOS nor EOS token")
-    return [int(bos_token_id), *map(int, ids)]
-
-
 def score_test_sentences_with_pythia(
     rows: Iterable[dict[str, Any]],
     *,
+    model_name: str = DEFAULT_PYTHIA_FILTER_MODEL,
     device: str = "auto",
     dtype: str = "auto",
     batch_size: int = 16,
     revision: str | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Score labeled SST test sentences with the paper's Pythia classifier."""
-    if batch_size < 1:
-        raise ValueError("batch_size must be positive")
-    test_rows = [dict(row) for row in rows if row["split"] == "test"]
-    device_spec = resolve_device(device, dtype)
-    tokenizer = AutoTokenizer.from_pretrained(PYTHIA_MODEL, revision=revision, use_fast=True)
-    if tokenizer.pad_token_id is None:
-        tokenizer.pad_token = tokenizer.eos_token
-    tokenizer.padding_side = "left"
-    model = AutoModelForCausalLM.from_pretrained(
-        PYTHIA_MODEL,
+    """Score labeled SST test sentences with the selected Pythia classifier."""
+    return score_binary_rows_with_pythia(
+        rows,
+        splits=("test",),
+        prompt_template=SCAFFOLD_TEMPLATE,
+        model_name=model_name,
+        device=device,
+        dtype=dtype,
+        batch_size=batch_size,
         revision=revision,
-        dtype=device_spec.dtype,
-    ).to(device_spec.device)
-    model.eval()
-    model.requires_grad_(False)
-
-    positive_id = _single_token_id(tokenizer, POSITIVE_ANSWER)
-    negative_id = _single_token_id(tokenizer, NEGATIVE_ANSWER)
-    scored: list[dict[str, Any]] = []
-    for start in tqdm(range(0, len(test_rows), batch_size), desc="Pythia SST filtering"):
-        batch_rows = test_rows[start : start + batch_size]
-        prompts = [SCAFFOLD_TEMPLATE.format(text=row["text"]) for row in batch_rows]
-        encoded_rows = [_token_ids(tokenizer, prompt) for prompt in prompts]
-        encoded = tokenizer.pad(
-            {"input_ids": encoded_rows},
-            padding=True,
-            return_attention_mask=True,
-            return_tensors="pt",
-        )
-        encoded = {key: value.to(device_spec.device) for key, value in encoded.items()}
-        with torch.inference_mode():
-            logits = model(**encoded, use_cache=False).logits[:, -1, :].float().cpu()
-        positive_logits = logits[:, positive_id]
-        negative_logits = logits[:, negative_id]
-        for index, (row, prompt, prompt_ids) in enumerate(zip(batch_rows, prompts, encoded_rows)):
-            positive_logit = float(positive_logits[index])
-            negative_logit = float(negative_logits[index])
-            positive_minus_negative = positive_logit - negative_logit
-            predicted_label = int(positive_minus_negative > 0)
-            raw_ids = _token_ids(tokenizer, row["text"])
-            scored.append(
-                {
-                    **row,
-                    "prompt": prompt,
-                    "pythia_raw_num_tokens": len(raw_ids),
-                    "pythia_prompt_num_tokens": len(prompt_ids),
-                    "positive_token_id": positive_id,
-                    "negative_token_id": negative_id,
-                    "positive_logit": positive_logit,
-                    "negative_logit": negative_logit,
-                    "positive_minus_negative_logit": positive_minus_negative,
-                    "signed_correct_logit_diff": (
-                        positive_minus_negative if row["label"] == 1 else -positive_minus_negative
-                    ),
-                    "predicted_label": predicted_label,
-                    "predicted_label_name": "positive" if predicted_label else "negative",
-                    "pythia_correct": predicted_label == row["label"],
-                }
-            )
-
-    metadata = {
-        "model_name": PYTHIA_MODEL,
-        "requested_revision": revision,
-        "resolved_model_revision": getattr(model.config, "_commit_hash", None),
-        "resolved_tokenizer_revision": tokenizer.init_kwargs.get("_commit_hash"),
-        "device": str(device_spec.device),
-        "dtype": str(device_spec.dtype),
-        "prepend_bos": True,
-        "positive_answer": POSITIVE_ANSWER,
-        "negative_answer": NEGATIVE_ANSWER,
-        "positive_token_id": positive_id,
-        "negative_token_id": negative_id,
-        "scaffold_template": SCAFFOLD_TEMPLATE,
-    }
-    del model
-    return scored, metadata
+    )
 
 
 def make_maximal_matches(rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -423,17 +340,18 @@ language:
 - en
 task_categories:
 - text-classification
-pretty_name: Sentiment Manifold SST Pythia-1.4B Preprocessing
+pretty_name: Sentiment Manifold SST Pythia Correctness-Filtered Preprocessing
 license: other
 configs:
 {config_lines}
 ---
 
-# Sentiment Manifold SST Pythia-1.4B Preprocessing
+# Sentiment Manifold SST Pythia Correctness-Filtered Preprocessing
 
-Source-sentence preprocessing for reproducing the SST directional-patching setup in Tigges et al.,
-*Language Models Linearly Represent Sentiment*. The source is Stanford Sentiment Treebank v1.0.
-Consult the original SST distribution for its terms and citation requirements.
+Source-sentence preprocessing for SST directional-patching experiments. The correctness-filter
+model is recorded in `metadata.json`. Pythia-1.4B preserves the Tigges et al. Table 1 reproduction;
+Pythia-2.8B is the RQ2 default. The source is Stanford Sentiment Treebank v1.0. Consult the original
+SST distribution for its terms and citation requirements.
 
 ## Binary-label variants
 
@@ -448,10 +366,11 @@ and `*_directed_pairs` configurations. When both variants are requested, Pythia 
 all Tigges-binarized test rows and correctness is computed independently for each label policy.
 
 No GPT-4 labels or manual pair validation are used. Matches are opposite according to SST's human
-labels; they are not minimal semantic rewrites. The legacy pair configurations preserve the
-paper-oriented Pythia pairing. RQ2 additionally writes `*_pairing_candidates`, tokenizer-specific
-pairs for GPT-2, Qwen, Gemma, and Pythia when selected, and `*_common_*` pairs whose full prompts
-have equal length under every selected tokenizer.
+labels; they are not minimal semantic rewrites. The legacy-schema pair configurations use the
+selected Pythia filter tokenizer; they reproduce the paper only when Pythia-1.4B is selected. RQ2
+additionally writes `*_pairing_candidates`, tokenizer-specific pairs for GPT-2, Qwen, Gemma, and
+Pythia when selected, and `*_common_*` pairs whose full prompts have equal length under every
+selected tokenizer.
 
 ## Counts
 
@@ -478,6 +397,7 @@ def publish_dataset_configs(
     private: bool,
     card_text: str,
     token: str,
+    default_repo_name: str = "sentiment-manifold-sst-pythia-2.8b",
 ) -> str:
     """Create a Hub dataset repository and upload every intermediate config."""
     if not token:
@@ -485,7 +405,7 @@ def publish_dataset_configs(
     api = HfApi(token=token)
     if repo_id is None:
         account = api.whoami()["name"]
-        repo_id = f"{account}/sentiment-manifold-sst-pythia-1.4b"
+        repo_id = f"{account}/{default_repo_name}"
     api.create_repo(repo_id=repo_id, repo_type="dataset", private=private, exist_ok=True)
     api.update_repo_settings(repo_id=repo_id, repo_type="dataset", private=private)
     for config_name, dataset_dict in datasets.items():
@@ -512,7 +432,10 @@ def preprocess_sst(
     device: str = "auto",
     dtype: str = "auto",
     batch_size: int = 16,
+    filter_revision: str | None = None,
+    # Backward-compatible programmatic alias for callers predating --filter-revision.
     revision: str | None = None,
+    filter_model: str = DEFAULT_PYTHIA_FILTER_MODEL,
     binarization: str = "both",
     pairing_models: Sequence[str] | None = None,
     pairing_revisions: Sequence[str] | None = None,
@@ -523,6 +446,9 @@ def preprocess_sst(
     tokenizers: Mapping[str, Any] | None = None,
 ) -> SSTPreprocessingResult:
     """Run, save, and optionally publish the complete SST preprocessing pipeline."""
+    if filter_revision is not None and revision is not None and filter_revision != revision:
+        raise ValueError("filter_revision and legacy revision specify different revisions")
+    resolved_filter_revision = filter_revision if filter_revision is not None else revision
     if push_to_hub:
         if not hf_token:
             raise ValueError(
@@ -556,10 +482,11 @@ def preprocess_sst(
     )
     shared_scored, model_metadata = score_test_sentences_with_pythia(
         variants[scoring_method],
+        model_name=filter_model,
         device=device,
         dtype=dtype,
         batch_size=batch_size,
-        revision=revision,
+        revision=resolved_filter_revision,
     )
     pairing_specs = resolve_pairing_models(pairing_models)
     parsed_pairing_revisions = parse_revision_overrides(pairing_revisions)
@@ -627,6 +554,7 @@ def preprocess_sst(
     counts = {"source_sentences": len(source_rows), "variants": variant_counts}
     metadata = {
         **model_metadata,
+        "correctness_filter": model_metadata,
         "sst_root": str(sst_root),
         "source_files_sha256": source_files,
         "source_rows": (
@@ -668,6 +596,9 @@ def preprocess_sst(
             private=private,
             card_text=card_text,
             token=hf_token,
+            default_repo_name=(
+                f"sentiment-manifold-sst-{model_metadata['filter_model_alias']}"
+            ),
         )
         metadata["hub_repo_id"] = published_repo
         (output_dir / "metadata.json").write_text(

@@ -45,7 +45,8 @@ source .venv/bin/activate
 pip install -e '.[dev,notebooks]'
 
 sentiment-manifold inspect-data --config configs/reproduction.yaml --model gpt2-small
-sentiment-manifold preprocess-sst --binarization both
+sentiment-manifold preprocess-sst --binarization both \
+  --filter-model pythia-1.4b --output-dir data/processed/sst-pythia-1.4b
 sentiment-manifold reproduce --config configs/reproduction.yaml --model gpt2-small --device auto
 sentiment-manifold plot --run-dir outputs/results/gpt2-small
 ```
@@ -64,28 +65,37 @@ copied configuration and limit the SST pair count.
 
 ## Secure SST preprocessing and Hugging Face upload
 
-The SST preprocessing command uses `EleutherAI/pythia-1.4b`. It saves both supported binary-label
-families and can upload the processed dataset to a private Hugging Face repository.
+The general preprocessing command defaults to Pythia-2.8B for RQ2. This RQ1 reproduction must pass
+`--filter-model pythia-1.4b` and save to `data/processed/sst-pythia-1.4b`. It saves both supported
+binary-label families and can upload the processed dataset to a private Hugging Face repository.
 
 Supply a write-capable token through a secret environment variable; do not paste a literal `hf_…`
 token into a notebook cell or shell command:
 
 ```bash
-HF_TOKEN="$MY_HF_WRITE_TOKEN" sentiment-manifold preprocess-sst --push-to-hub --private
+HF_TOKEN="$MY_HF_WRITE_TOKEN" sentiment-manifold preprocess-sst \
+  --filter-model pythia-1.4b --output-dir data/processed/sst-pythia-1.4b \
+  --push-to-hub --private
 ```
 
 Here `MY_HF_WRITE_TOKEN` should already have been populated by a password manager, CI secret, or
 Colab secret. If `HF_TOKEN` is already exported, run:
 
 ```bash
-sentiment-manifold preprocess-sst --push-to-hub --private
+sentiment-manifold preprocess-sst \
+  --filter-model pythia-1.4b --output-dir data/processed/sst-pythia-1.4b \
+  --push-to-hub --private
 ```
 
 A differently named secret and Hugging Face's token-file convention are also supported:
 
 ```bash
-sentiment-manifold preprocess-sst --push-to-hub --private --hf-token-env MY_PRIVATE_HF_TOKEN
-HF_TOKEN_PATH=/run/secrets/huggingface-token sentiment-manifold preprocess-sst --push-to-hub --private
+sentiment-manifold preprocess-sst --filter-model pythia-1.4b \
+  --output-dir data/processed/sst-pythia-1.4b --push-to-hub --private \
+  --hf-token-env MY_PRIVATE_HF_TOKEN
+HF_TOKEN_PATH=/run/secrets/huggingface-token sentiment-manifold preprocess-sst \
+  --filter-model pythia-1.4b --output-dir data/processed/sst-pythia-1.4b \
+  --push-to-hub --private
 ```
 
 Credentials are checked before Pythia is downloaded or evaluated. The token is passed to the Hub
@@ -127,7 +137,8 @@ candidate_pool = load_dataset(
 
 ```bash
 sentiment-manifold inspect-data --config configs/reproduction.yaml
-sentiment-manifold preprocess-sst --binarization both
+sentiment-manifold preprocess-sst --binarization both \
+  --filter-model pythia-1.4b --output-dir data/processed/sst-pythia-1.4b
 sentiment-manifold reproduce --config configs/reproduction.yaml --model gpt2-small --device auto
 sentiment-manifold plot --run-dir outputs/results/gpt2-small
 ```

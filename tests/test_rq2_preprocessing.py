@@ -13,6 +13,10 @@ from sentiment_manifold.data.preprocessing.dynasent import (
     preprocess_dynasent,
 )
 from sentiment_manifold.data.preprocessing.imdb import imdb_rows, preprocess_imdb
+from sentiment_manifold.models.sentiment_filter import (
+    DEFAULT_PYTHIA_FILTER_MODEL,
+    resolve_pythia_filter_model,
+)
 
 
 class _WhitespaceTokenizer:
@@ -33,6 +37,43 @@ class _WhitespaceTokenizer:
         return {"input_ids": ids}
 
 
+def _fake_pythia_score(
+    rows,
+    *,
+    splits=("test",),
+    prompt_template="Review Text: {text} Review Sentiment:",
+    model_name="pythia-2.8b",
+    **_kwargs,
+):
+    scored = []
+    for source in rows:
+        if source["split"] not in set(splits):
+            continue
+        row = dict(source)
+        predicted = 1 - int(row["label"]) if "misclassified" in row["text"] else int(row["label"])
+        difference = 1.0 if predicted else -1.0
+        scored.append(
+            {
+                **row,
+                "prompt": prompt_template.format(text=row["text"]),
+                "filter_model_alias": model_name,
+                "filter_model_name": "EleutherAI/pythia-2.8b",
+                "pythia_raw_num_tokens": len(row["text"].split()) + 1,
+                "pythia_prompt_num_tokens": len(prompt_template.format(text=row["text"]).split()) + 1,
+                "positive_minus_negative_logit": difference,
+                "signed_correct_logit_diff": difference if row["label"] else -difference,
+                "predicted_label": predicted,
+                "predicted_label_name": "positive" if predicted else "negative",
+                "pythia_correct": predicted == row["label"],
+            }
+        )
+    return scored, {
+        "filter_model_alias": model_name,
+        "filter_model_name": "EleutherAI/pythia-2.8b",
+        "filter_splits": list(splits),
+    }
+
+
 def test_all_four_pairing_models_are_available():
     specs = resolve_pairing_models(None)
     assert [spec.alias for spec in specs] == [
@@ -47,6 +88,14 @@ def test_all_four_pairing_models_are_available():
         "google/gemma-2b",
         "EleutherAI/pythia-1.4b",
     ]
+
+
+def test_rq2_correctness_filter_defaults_to_pythia_2_8b():
+    assert DEFAULT_PYTHIA_FILTER_MODEL == "pythia-2.8b"
+    assert resolve_pythia_filter_model(DEFAULT_PYTHIA_FILTER_MODEL) == (
+        "pythia-2.8b",
+        "EleutherAI/pythia-2.8b",
+    )
 
 
 def test_model_specific_and_common_pairs_have_equal_full_prompt_lengths():
@@ -144,6 +193,7 @@ def test_ait_pipeline_saves_binary_and_pairing_configs(tmp_path):
         "common_directed_pairs",
     }
     assert result.metadata["counts"]["pairing"]["gpt2-small"]["matched_pairs"] == 3
+    assert "correctness_filter" not in result.metadata
     assert (result.output_dir / "metadata.json").is_file()
 
 
@@ -159,12 +209,16 @@ def test_imdb_normalization_ignores_unsupervised_rows():
     assert rows[0]["text"] == "awful"
 
 
-def test_imdb_pipeline_builds_test_pairs_without_network(tmp_path):
+def test_imdb_pipeline_filters_with_pythia_before_building_test_pairs(tmp_path, monkeypatch):
+    import sentiment_manifold.data.preprocessing.imdb as module
+
+    monkeypatch.setattr(module, "score_binary_rows_with_pythia", _fake_pythia_score)
     source = {
         "train": [{"text": "training review", "label": 1}],
         "test": [
             {"text": "very bad", "label": 0},
             {"text": "very good", "label": 1},
+            {"text": "misclassified positive", "label": 1},
         ],
     }
     result = preprocess_imdb(
@@ -177,6 +231,10 @@ def test_imdb_pipeline_builds_test_pairs_without_network(tmp_path):
         "matched_pairs": 1,
         "directed_pairs": 2,
     }
+    assert result.metadata["counts"]["pythia_scored_rows"] == 3
+    assert result.metadata["counts"]["pythia_correct_rows"] == 2
+    assert result.metadata["correctness_filter"]["filter_model_alias"] == "pythia-2.8b"
+    assert {"binary", "pythia_scored", "pythia_correct"} <= set(result.datasets)
 
 
 def test_dynasent_keeps_only_gold_binary_labels(tmp_path):
@@ -193,7 +251,10 @@ def test_dynasent_keeps_only_gold_binary_labels(tmp_path):
     assert len(checksums[str(source.resolve())]) == 64
 
 
-def test_dynasent_pipeline_keeps_rounds_separate(tmp_path):
+def test_dynasent_pipeline_keeps_rounds_separate_and_filters_pairs(tmp_path, monkeypatch):
+    import sentiment_manifold.data.preprocessing.dynasent as module
+
+    monkeypatch.setattr(module, "score_binary_rows_with_pythia", _fake_pythia_score)
     files = {}
     for split in ("train", "validation", "test"):
         path = tmp_path / f"dynasent-round02-{split}.jsonl"
@@ -218,3 +279,6 @@ def test_dynasent_pipeline_keeps_rounds_separate(tmp_path):
         "matched_pairs": 1,
         "directed_pairs": 2,
     }
+    assert result.metadata["counts"]["r2"]["pythia_correct_rows"] == 2
+    assert "r2_pythia_scored" in result.datasets
+    assert "r2_pythia_correct" in result.datasets

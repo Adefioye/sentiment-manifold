@@ -134,7 +134,10 @@ def test_preprocess_saves_complete_config_family_for_both_methods(tmp_path, monk
             }
         )
 
-    def fake_score(rows, **_kwargs):
+    scoring_calls = []
+
+    def fake_score(rows, **kwargs):
+        scoring_calls.append(kwargs)
         scored = []
         for row in rows:
             predicted = int(row["sentiment_score"] > 0.5)
@@ -151,7 +154,10 @@ def test_preprocess_saves_complete_config_family_for_both_methods(tmp_path, monk
                     "pythia_correct": predicted == row["label"],
                 }
             )
-        return scored, {"model_name": "fake-pythia"}
+        return scored, {
+            "filter_model_alias": kwargs["model_name"],
+            "filter_model_name": "EleutherAI/pythia-2.8b",
+        }
 
     monkeypatch.setattr(module, "load_sst_source_sentences", lambda _root: source_rows)
     monkeypatch.setattr(module, "score_test_sentences_with_pythia", fake_score)
@@ -187,6 +193,7 @@ def test_preprocess_saves_complete_config_family_for_both_methods(tmp_path, monk
     assert set(result.metadata["dataset_configs"]) == expected | rq2_expected
     assert all((result.output_dir / name).is_dir() for name in expected | rq2_expected)
     assert result.metadata["pairing_models"] == ["gpt2-small"]
+    assert scoring_calls[0]["model_name"] == "pythia-2.8b"
 
 
 def test_matches_are_maximal_non_reused_opposite_and_equal_length():

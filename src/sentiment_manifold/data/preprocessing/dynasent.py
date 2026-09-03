@@ -8,6 +8,10 @@ from pathlib import Path
 import re
 from typing import Any, Mapping, Sequence
 
+from ...models.sentiment_filter import (
+    DEFAULT_PYTHIA_FILTER_MODEL,
+    score_binary_rows_with_pythia,
+)
 from .common import (
     DEFAULT_PROMPT_TEMPLATE,
     BinaryPreprocessingResult,
@@ -104,6 +108,11 @@ def preprocess_dynasent(
     pairing_revisions: Sequence[str] | None = None,
     pairing_splits: Sequence[str] = ("test",),
     prompt_template: str = DEFAULT_PROMPT_TEMPLATE,
+    filter_model: str = DEFAULT_PYTHIA_FILTER_MODEL,
+    filter_revision: str | None = None,
+    device: str = "auto",
+    dtype: str = "auto",
+    batch_size: int = 16,
     push_to_hub: bool = False,
     hub_repo_id: str | None = None,
     private: bool = True,
@@ -115,6 +124,17 @@ def preprocess_dynasent(
         raise ValueError(f"DynaSent rounds must be 1 and/or 2, got {invalid_rounds}")
     source_files = files or discover_dynasent_files(dynasent_root, rounds)
     rows_by_round, checksums, removed = load_dynasent_binary(source_files)
+    all_rows = [row for round_number in rounds for row in rows_by_round.get(round_number, [])]
+    all_scored, filter_metadata = score_binary_rows_with_pythia(
+        all_rows,
+        splits=pairing_splits,
+        prompt_template=prompt_template,
+        model_name=filter_model,
+        revision=filter_revision,
+        device=device,
+        dtype=dtype,
+        batch_size=batch_size,
+    )
     specs = resolve_pairing_models(pairing_models)
     revisions = parse_revision_overrides(pairing_revisions)
     datasets: dict[str, Any] = {}
@@ -122,8 +142,10 @@ def preprocess_dynasent(
     tokenizer_metadata: dict[str, Any] = {}
     for round_number in rounds:
         rows = rows_by_round.get(round_number, [])
+        scored = [row for row in all_scored if int(row["round"]) == round_number]
+        correct = [row for row in scored if bool(row["pythia_correct"])]
         annotated, tokenizer_metadata = annotate_token_lengths(
-            rows,
+            correct,
             specs=specs,
             prompt_template=prompt_template,
             revisions=revisions,
@@ -136,10 +158,15 @@ def preprocess_dynasent(
             splits=pairing_splits,
         )
         datasets[f"r{round_number}_binary"] = dataset_dict_by_split(rows)
+        datasets[f"r{round_number}_pythia_scored"] = dataset_dict_by_split(scored)
+        datasets[f"r{round_number}_pythia_correct"] = dataset_dict_by_split(correct)
         datasets.update({f"r{round_number}_{name}": value for name, value in pairing_configs.items()})
         round_metadata[f"r{round_number}"] = {
             "binary_rows": len(rows),
             "excluded_non_binary_rows": removed.get(round_number, 0),
+            "pythia_scored_rows": len(scored),
+            "pythia_correct_rows": len(correct),
+            "pythia_incorrect_rows": len(scored) - len(correct),
             "by_split": {
                 split: sum(row["split"] == split for row in rows)
                 for split in ("train", "validation", "test")
@@ -150,6 +177,7 @@ def preprocess_dynasent(
         "dataset": "DynaSent 1.1 Round 1 and Round 2",
         "rounds": list(rounds),
         "label_policy": "retain gold positive/negative; exclude neutral and non-binary labels",
+        "correctness_filter": filter_metadata,
         "source_files_sha256": checksums,
         "prompt_template": prompt_template,
         "pairing_splits": list(pairing_splits),
@@ -164,7 +192,10 @@ def preprocess_dynasent(
         metadata=metadata,
         push_to_hub=push_to_hub,
         hub_repo_id=hub_repo_id,
-        default_repo_name="sentiment-manifold-dynasent-r1-r2-binary",
+        default_repo_name=(
+            "sentiment-manifold-dynasent-r1-r2-"
+            f"{filter_metadata['filter_model_alias']}"
+        ),
         private=private,
         hf_token=hf_token,
     )

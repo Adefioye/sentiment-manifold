@@ -14,13 +14,17 @@ source .venv/bin/activate
 pip install -e '.[dev,notebooks]'
 
 sentiment-manifold inspect-data --model gpt2-small
-sentiment-manifold preprocess-sst --binarization both
+sentiment-manifold preprocess-sst --binarization both \
+  --filter-model pythia-1.4b --output-dir data/processed/sst-pythia-1.4b
 sentiment-manifold reproduce --config configs/reproduction.yaml --model gpt2-small
 sentiment-manifold plot --run-dir outputs/results/gpt2-small
 ```
 
 Model aliases are `gpt2-small`, `qwen-0.6b`, `gemma-2b`, and `pythia-1.4b`. Commands support CUDA,
 MPS, and CPU through `--device auto`, `cuda`, `mps`, or `cpu`.
+
+RQ2 preprocessing uses Pythia-2.8B to correctness-filter SST, IMDb, and DynaSent; AIT is not
+correctness-filtered. The explicit Pythia-1.4B option above preserves the separate RQ1 benchmark.
 
 For Colab, use
 [`notebooks/01_colab_sst_to_gpt2_results.ipynb`](notebooks/01_colab_sst_to_gpt2_results.ipynb).
@@ -32,7 +36,8 @@ For Colab, use
   [per-method commands and optional tuning](docs/rq-1/METHOD_COMMANDS.md), and
   [implementation details](docs/rq-1/IMPLEMENTATION.md).
 - **RQ2 — valence/sentiment alignment data:**
-  [AIT, SST, IMDb, and DynaSent preprocessing commands](docs/rq-2/README.md).
+  [overview](docs/rq-2/README.md) and
+  [AIT, SST, IMDb, and DynaSent preprocessing guide](docs/rq-2/PREPROCESSING.md).
 - **Sentiment-manifold research program:**
   [research questions, methodology, diagnostics, and roadmap](docs/rq-sentiment-manifolds/README.md).
 

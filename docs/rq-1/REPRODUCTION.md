@@ -24,7 +24,8 @@ eight verbs are `enjoyed`, `loved`, `liked`, `appreciated`, `admired`, `hated`, 
 
 ```bash
 sentiment-manifold inspect-data --config configs/reproduction.yaml
-sentiment-manifold preprocess-sst --binarization both
+sentiment-manifold preprocess-sst --binarization both \
+  --filter-model pythia-1.4b --output-dir data/processed/sst-pythia-1.4b
 sentiment-manifold reproduce --config configs/reproduction.yaml --model gpt2-small --device auto
 sentiment-manifold reproduce --config configs/reproduction.yaml --model qwen-0.6b --device auto
 sentiment-manifold reproduce --config configs/reproduction.yaml --model gpt2-small --with-openwebtext-resample-ablation

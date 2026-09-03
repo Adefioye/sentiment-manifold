@@ -340,6 +340,18 @@ def save_dataset_configs(datasets: Mapping[str, DatasetDict], output_dir: Path) 
 
 def make_dataset_card(dataset_name: str, metadata: Mapping[str, Any]) -> str:
     configs = "\n".join(f"- config_name: {name}" for name in metadata["dataset_configs"])
+    filter_metadata = metadata.get("correctness_filter")
+    if isinstance(filter_metadata, Mapping):
+        selection_note = (
+            "Labels remain dataset ground truth. Before pairing, examples are selected where "
+            f"`{filter_metadata.get('filter_model_name')}` agrees with those labels; model "
+            "predictions never relabel examples."
+        )
+    else:
+        selection_note = (
+            "Labels are dataset ground truth; no language-model prediction is used to select, "
+            "create, or relabel examples."
+        )
     return f"""---
 language:
 - en
@@ -355,8 +367,7 @@ configs:
 
 Binary sentiment/valence records plus deterministic equal-full-prompt-length pairs for the
 tokenizers declared in `metadata.json`. The `common_*` configurations are equal length under
-every selected tokenizer. Labels are dataset ground truth; no language-model prediction is used
-to create or relabel examples.
+every selected tokenizer. {selection_note}
 
 This repository being private controls access but does not replace the source dataset's license,
 terms, attribution, or redistribution requirements. Consult the source dataset before sharing.

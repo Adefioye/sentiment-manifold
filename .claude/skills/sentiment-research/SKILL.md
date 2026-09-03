@@ -11,7 +11,7 @@ Use the executable package as the source of truth. Keep scientific decisions exp
 
 Classify the request before editing code:
 
-1. **Replication:** preserve Tigges prompts, splits, token filtering, intervention semantics, and metrics. Read `references/methodology.md` and `../../../docs/REPRODUCTION.md`.
+1. **Replication:** preserve Tigges prompts, splits, token filtering, intervention semantics, and metrics. Read `references/methodology.md` and `../../../docs/rq-1/REPRODUCTION.md`.
 2. **Discovery:** explore layers, directions, dimensions, geometry, or failure modes using train/validation data only. Read `../../../docs/rq-sentiment-manifolds/03-methodology.md`.
 3. **Confirmation:** freeze the selected method, layer, strength, and controls before opening the held-out/OOD result.
 4. **Mechanism:** begin component/path analysis only after a representation survives causal baselines.
@@ -54,4 +54,3 @@ Run focused unit tests, then a tiny CPU smoke configuration. Check:
 - OpenWebText as an unlabeled loss/support diagnostic, not a sentiment-selection label.
 
 Report discrepancies from the paper rather than adjusting the benchmark silently. Preserve negative results and resolved configs.
-

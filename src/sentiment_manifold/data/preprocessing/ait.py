@@ -28,7 +28,32 @@ def _file_sha256(path: Path) -> str:
 
 
 def _normalized_keys(row: Mapping[str, Any]) -> dict[str, Any]:
-    return {re.sub(r"[^a-z0-9]+", "_", key.lower()).strip("_"): value for key, value in row.items()}
+    return {
+        re.sub(r"[^a-z0-9]+", "_", key.lower()).strip("_"): value
+        for key, value in row.items()
+        if key is not None
+    }
+
+
+def _validate_official_columns(fieldnames: Sequence[str] | None, path: Path) -> None:
+    if fieldnames is None:
+        raise ValueError(f"AIT file has no header: {path}")
+    normalized = {
+        re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_") for name in fieldnames
+    }
+    required = {"id", "tweet", "affect_dimension", "intensity_class"}
+    missing = sorted(required - normalized)
+    if missing:
+        delimiter_hint = (
+            " The official files use a .txt extension but their four columns are "
+            "tab-delimited; do not convert tabs to spaces."
+            if len(fieldnames) == 1
+            else ""
+        )
+        raise ValueError(
+            f"AIT file {path} is missing official columns {missing}; found {fieldnames}."
+            f"{delimiter_hint}"
+        )
 
 
 def _ordinal_class(value: Any) -> int:
@@ -42,10 +67,11 @@ def _ordinal_class(value: Any) -> int:
 
 
 def load_ait_binary(files: Mapping[str, str | Path]) -> tuple[list[dict[str, Any]], dict[str, str]]:
-    """Load Valence-oc gold TSVs and map -3..-1/1..3 to binary labels.
+    """Load the official tab-delimited Valence-oc ``.txt`` files.
 
-    The zero class is excluded. The original seven-level ordinal annotation is
-    retained so later analyses do not mistake it for a continuous measurement.
+    The source tweet is retained verbatim. The zero class is excluded and the
+    original seven-level ordinal annotation is retained so later analyses do
+    not mistake it for a continuous measurement.
     """
     rows: list[dict[str, Any]] = []
     checksums: dict[str, str] = {}
@@ -59,16 +85,19 @@ def load_ait_binary(files: Mapping[str, str | Path]) -> tuple[list[dict[str, Any
         checksums[str(path)] = _file_sha256(path)
         with path.open(encoding="utf-8-sig", newline="") as handle:
             reader = csv.DictReader(handle, delimiter="\t")
-            if reader.fieldnames is None:
-                raise ValueError(f"AIT file has no header: {path}")
+            _validate_official_columns(reader.fieldnames, path)
             for index, source in enumerate(reader):
                 normalized = _normalized_keys(source)
-                text = normalized.get("tweet") or normalized.get("text")
-                example_id = normalized.get("id") or normalized.get("tweet_id")
-                class_value = normalized.get("intensity_class") or normalized.get("class")
-                if text is None or class_value is None:
+                text = normalized.get("tweet")
+                example_id = normalized.get("id")
+                dimension = str(normalized.get("affect_dimension", "")).strip().lower()
+                class_value = normalized.get("intensity_class")
+                if text is None or not str(example_id).strip() or class_value is None:
+                    raise ValueError(f"AIT file {path} has an incomplete row at line {index + 2}")
+                if dimension != "valence":
                     raise ValueError(
-                        f"AIT file {path} must contain Tweet/Text and Intensity Class columns"
+                        f"AIT file {path} line {index + 2} has Affect Dimension "
+                        f"{dimension!r}, expected 'valence'"
                     )
                 ordinal = _ordinal_class(class_value)
                 if ordinal == 0:
@@ -76,8 +105,8 @@ def load_ait_binary(files: Mapping[str, str | Path]) -> tuple[list[dict[str, Any
                 label = int(ordinal > 0)
                 rows.append(
                     {
-                        "example_id": f"ait-{split}-{example_id or index}",
-                        "source_example_id": str(example_id or index),
+                        "example_id": f"ait-{split}-{example_id}",
+                        "source_example_id": str(example_id),
                         "text": str(text),
                         "label": label,
                         "label_name": "positive" if label else "negative",
@@ -96,7 +125,11 @@ def discover_ait_files(ait_root: str | Path) -> dict[str, Path]:
         raise FileNotFoundError(f"AIT root does not exist: {root}")
     discovered: dict[str, Path] = {}
     for path in sorted(root.rglob("*")):
-        if not path.is_file() or "valence" not in path.name.lower():
+        if (
+            not path.is_file()
+            or path.suffix.lower() not in {".txt", ".tsv"}
+            or "valence" not in path.name.lower()
+        ):
             continue
         lower = path.name.lower()
         for source_name in ("train", "dev", "test"):

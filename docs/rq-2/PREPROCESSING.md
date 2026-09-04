@@ -85,7 +85,10 @@ the relevant model's pairs.
 
 ## AIT V-oc
 
-Use the English train/dev/test gold files from SemEval-2018 Task 1 Affect in Tweets:
+Use the English train/dev/test gold files from SemEval-2018 Task 1 Affect in Tweets. The official
+files have a `.txt` extension but contain four **tab-delimited** columns: `ID`, `Tweet`,
+`Affect Dimension`, and `Intensity Class`. Keep the tabs intact; a space-aligned copy from a
+document preview is not equivalent to the source file.
 
 ```bash
 sentiment-manifold preprocess-ait \
@@ -104,7 +107,9 @@ sentiment-manifold preprocess-ait \
 
 The binary policy is `-3,-2,-1 → negative`, `0 → excluded`, and `1,2,3 → positive`. The retained
 `original_valence_class` is ordinal, not an interval-scale continuous score. All three splits are
-paired by default, but training, selection, and final testing must remain separate.
+paired by default, but training, selection, and final testing must remain separate. Tweet text is
+retained verbatim—including emojis, mentions, hashtags, punctuation, and strings such as
+`&amp;`—so source provenance and tokenizer-length calculations are not silently changed.
 
 ## SST
 

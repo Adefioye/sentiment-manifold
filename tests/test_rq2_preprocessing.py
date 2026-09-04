@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from sentiment_manifold.data.preprocessing.ait import load_ait_binary, preprocess_ait
 from sentiment_manifold.data.preprocessing.common import (
     PairingModelSpec,
@@ -157,19 +159,42 @@ def test_over_context_prompts_are_annotated_and_not_paired():
     ) == []
 
 
-def _write_ait(path, rows):
+def _write_ait(path, rows, *, dimension="valence"):
     header = "ID\tTweet\tAffect Dimension\tIntensity Class\n"
-    body = "".join(f"{row_id}\t{text}\tvalence\t{score}: class\n" for row_id, text, score in rows)
+    body = "".join(
+        f"{row_id}\t{text}\t{dimension}\t{score}: class\n"
+        for row_id, text, score in rows
+    )
     path.write_text(header + body, encoding="utf-8")
 
 
 def test_ait_binary_mapping_excludes_zero_and_retains_ordinal_class(tmp_path):
     train = tmp_path / "2018-Valence-oc-En-train.txt"
-    _write_ait(train, [("1", "bad tweet", -2), ("2", "neutral tweet", 0), ("3", "good tweet", 3)])
+    source_text = "call &amp; hang up #furious 😍"
+    _write_ait(
+        train,
+        [("1", source_text, -2), ("2", "neutral tweet", 0), ("3", "good tweet", 3)],
+    )
     rows, checksums = load_ait_binary({"train": train})
     assert [row["label"] for row in rows] == [0, 1]
     assert [row["original_valence_class"] for row in rows] == [-2, 3]
+    assert rows[0]["text"] == source_text
     assert len(checksums[str(train.resolve())]) == 64
+
+
+def test_ait_txt_must_retain_tabs_and_valence_dimension(tmp_path):
+    flattened = tmp_path / "2018-Valence-oc-En-train.txt"
+    flattened.write_text(
+        "ID Tweet Affect Dimension Intensity Class\n1 text valence -1: class\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="tab-delimited"):
+        load_ait_binary({"train": flattened})
+
+    wrong_dimension = tmp_path / "2018-Valence-oc-En-dev.txt"
+    _write_ait(wrong_dimension, [("1", "text", 1)], dimension="anger")
+    with pytest.raises(ValueError, match="expected 'valence'"):
+        load_ait_binary({"dev": wrong_dimension})
 
 
 def test_ait_pipeline_saves_binary_and_pairing_configs(tmp_path):

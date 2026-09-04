@@ -53,3 +53,20 @@ def test_rq2_colab_notebook_covers_preprocessing_private_publish_and_exploration
 
     # A tracked notebook must never contain a pasted Hugging Face access token.
     assert re.search(r"hf_[A-Za-z0-9]{20,}", source) is None
+
+
+def test_rq2_colab_notebook_mounts_drive_and_uses_configured_ait_source():
+    source = "\n".join(
+        "".join(cell["source"])
+        for cell in _notebook()["cells"]
+    )
+
+    assert 'DRIVE_MOUNT_ROOT = CONTENT_ROOT / "drive"' in source
+    assert (
+        'AIT_SOURCE = DRIVE_MOUNT_ROOT / "MyDrive/sentiment-manifold/data/ait/V-oc"'
+        in source
+    )
+    assert "from google.colab import drive" in source
+    assert 'drive.mount(str(DRIVE_MOUNT_ROOT), force_remount=False)' in source
+    assert "uploaded = files.upload()" not in source
+    assert "from google.colab import files" not in source

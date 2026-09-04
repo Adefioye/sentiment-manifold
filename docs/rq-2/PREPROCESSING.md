@@ -52,6 +52,11 @@ never place a token in a notebook, tracked file, command argument, or output log
 Private Hub access does not grant redistribution permission. Check each source's license and terms,
 especially for tweets, IMDb reviews, and DynaSent Round 1 Yelp-derived text.
 
+The [Colab preprocessing and exploration notebook](../../notebooks/02_colab_preprocess_publish_explore_rq2.ipynb)
+runs all four pipelines, verifies that requested Hub repositories are private, and produces
+text-free CSV summaries. Because AIT V-oc restricts redistribution, its Hub upload is guarded by
+an explicit permission acknowledgement and remains local by default.
+
 ## Pairing tokenizers
 
 The default is all four:

@@ -26,8 +26,9 @@ MPS, and CPU through `--device auto`, `cuda`, `mps`, or `cpu`.
 RQ2 preprocessing uses Pythia-2.8B to correctness-filter SST, IMDb, and DynaSent; AIT is not
 correctness-filtered. The explicit Pythia-1.4B option above preserves the separate RQ1 benchmark.
 
-For Colab, use
-[`notebooks/01_colab_sst_to_gpt2_results.ipynb`](notebooks/01_colab_sst_to_gpt2_results.ipynb).
+For Colab, use the
+[`RQ1 SST-to-GPT-2 notebook`](notebooks/01_colab_sst_to_gpt2_results.ipynb) or the
+[`RQ2 preprocess, private-publish, and explore notebook`](notebooks/02_colab_preprocess_publish_explore_rq2.ipynb).
 
 ## Documentation
 

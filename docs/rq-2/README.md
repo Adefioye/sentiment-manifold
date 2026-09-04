@@ -28,6 +28,8 @@ Pythia-2.8B is the default **selection model**, not an additional pairing target
 
 - [Preprocessing guide](PREPROCESSING.md): dataset commands, correctness filtering, output
   configurations, provenance, publishing, and cross-model pairing policy.
+- [Colab notebook](../../notebooks/02_colab_preprocess_publish_explore_rq2.ipynb): end-to-end
+  preprocessing, private Hub publication, reload checks, and descriptive data exploration.
 - [RQ1 reproduction](../rq-1/README.md): the separate Tigges Table 1 protocol, which retains its
   original Pythia-1.4B SST correctness filter.
 

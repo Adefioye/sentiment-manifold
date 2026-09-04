@@ -9,3 +9,6 @@ checkpoints/
 outputs/**/directions/
 outputs/**/trial_directions/
 data/processed/
+
+# dotenv files
+.env

@@ -9,6 +9,7 @@ import re
 from typing import Any, Mapping, Sequence
 
 from .common import (
+    DEFAULT_MAX_PAIRING_PROMPT_TOKENS,
     DEFAULT_PROMPT_TEMPLATE,
     BinaryPreprocessingResult,
     annotate_token_lengths,
@@ -152,6 +153,7 @@ def preprocess_ait(
     pairing_models: Sequence[str] | None = None,
     pairing_revisions: Sequence[str] | None = None,
     pairing_splits: Sequence[str] = ("train", "validation", "test"),
+    max_pairing_prompt_tokens: int = DEFAULT_MAX_PAIRING_PROMPT_TOKENS,
     prompt_template: str = DEFAULT_PROMPT_TEMPLATE,
     push_to_hub: bool = False,
     hub_repo_id: str | None = None,
@@ -178,6 +180,7 @@ def preprocess_ait(
         dataset_name="ait",
         specs=specs,
         splits=pairing_splits,
+        max_prompt_tokens=max_pairing_prompt_tokens,
     )
     datasets = {"binary": dataset_dict_by_split(rows), **pairing_configs}
     metadata = {
@@ -189,6 +192,7 @@ def preprocess_ait(
         "source_files_sha256": checksums,
         "prompt_template": prompt_template,
         "pairing_splits": list(pairing_splits),
+        "max_pairing_prompt_tokens": max_pairing_prompt_tokens,
         "pairing_models": [spec.alias for spec in specs],
         "tokenizers": tokenizer_metadata,
         "counts": {

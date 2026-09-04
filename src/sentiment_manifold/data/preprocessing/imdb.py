@@ -13,6 +13,7 @@ from ...models.sentiment_filter import (
     score_binary_rows_with_pythia,
 )
 from .common import (
+    DEFAULT_MAX_PAIRING_PROMPT_TOKENS,
     DEFAULT_PROMPT_TEMPLATE,
     BinaryPreprocessingResult,
     annotate_token_lengths,
@@ -58,6 +59,7 @@ def preprocess_imdb(
     pairing_models: Sequence[str] | None = None,
     pairing_revisions: Sequence[str] | None = None,
     pairing_splits: Sequence[str] = ("test",),
+    max_pairing_prompt_tokens: int = DEFAULT_MAX_PAIRING_PROMPT_TOKENS,
     prompt_template: str = DEFAULT_PROMPT_TEMPLATE,
     filter_model: str = DEFAULT_PYTHIA_FILTER_MODEL,
     filter_revision: str | None = None,
@@ -100,6 +102,7 @@ def preprocess_imdb(
         dataset_name="imdb",
         specs=specs,
         splits=pairing_splits,
+        max_prompt_tokens=max_pairing_prompt_tokens,
     )
     datasets = {
         "binary": dataset_dict_by_split(rows),
@@ -115,6 +118,7 @@ def preprocess_imdb(
         "correctness_filter": filter_metadata,
         "prompt_template": prompt_template,
         "pairing_splits": list(pairing_splits),
+        "max_pairing_prompt_tokens": max_pairing_prompt_tokens,
         "pairing_models": [spec.alias for spec in specs],
         "tokenizers": tokenizer_metadata,
         "counts": {

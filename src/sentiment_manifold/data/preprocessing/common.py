@@ -18,6 +18,7 @@ from transformers import AutoTokenizer
 
 
 DEFAULT_PROMPT_TEMPLATE = "Review Text: {text} Review Sentiment:"
+DEFAULT_MAX_PAIRING_PROMPT_TOKENS = 1000
 
 
 @dataclass(frozen=True)
@@ -187,12 +188,15 @@ def make_equal_length_matches(
     specs: Sequence[PairingModelSpec],
     pairing_model: str,
     splits: Sequence[str],
+    max_prompt_tokens: int = DEFAULT_MAX_PAIRING_PROMPT_TOKENS,
 ) -> list[dict[str, Any]]:
-    """Make maximal deterministic pairs with equal full-prompt token lengths.
+    """Make maximal deterministic pairs with bounded, equal full-prompt lengths.
 
     ``pairing_model='common'`` requires equality under every selected tokenizer.
     Every example is used at most once per model configuration and split.
     """
+    if max_prompt_tokens < 1:
+        raise ValueError("max_prompt_tokens must be positive")
     if pairing_model == "common":
         active_specs = tuple(specs)
         if not active_specs:
@@ -213,6 +217,11 @@ def make_equal_length_matches(
         if label not in (0, 1):
             raise ValueError(f"Binary pairing requires labels 0/1, got {label}")
         if not all(bool(row[f"{spec.column_prefix}_fits_context"]) for spec in active_specs):
+            continue
+        if not all(
+            int(row[f"{spec.column_prefix}_prompt_num_tokens"]) <= max_prompt_tokens
+            for spec in active_specs
+        ):
             continue
         signature = tuple(
             int(row[f"{spec.column_prefix}_prompt_num_tokens"]) for spec in active_specs
@@ -313,6 +322,7 @@ def build_pairing_configs(
     dataset_name: str,
     specs: Sequence[PairingModelSpec],
     splits: Sequence[str],
+    max_prompt_tokens: int = DEFAULT_MAX_PAIRING_PROMPT_TOKENS,
 ) -> tuple[dict[str, DatasetDict], dict[str, dict[str, int]]]:
     configs: dict[str, DatasetDict] = {"pairing_candidates": dataset_dict_by_split(rows)}
     counts: dict[str, dict[str, int]] = {}
@@ -323,6 +333,7 @@ def build_pairing_configs(
             specs=specs,
             pairing_model=name,
             splits=splits,
+            max_prompt_tokens=max_prompt_tokens,
         )
         directed = make_directed_pairs(matches)
         slug = "common" if name == "common" else PAIRING_MODEL_SPECS[name].column_prefix
@@ -358,6 +369,13 @@ def make_dataset_card(dataset_name: str, metadata: Mapping[str, Any]) -> str:
             "Labels are dataset ground truth; no language-model prediction is used to select, "
             "create, or relabel examples."
         )
+    pairing_limit = metadata.get("max_pairing_prompt_tokens")
+    limit_note = (
+        f" Every matched or directed prompt is at most {int(pairing_limit)} tokens under its "
+        "pairing tokenizer; common pairs satisfy this limit under every selected tokenizer."
+        if pairing_limit is not None
+        else ""
+    )
     return f"""---
 language:
 - en
@@ -373,7 +391,7 @@ configs:
 
 Binary sentiment/valence records plus deterministic equal-full-prompt-length pairs for the
 tokenizers declared in `metadata.json`. The `common_*` configurations are equal length under
-every selected tokenizer. {selection_note}
+every selected tokenizer. {selection_note}{limit_note}
 
 This repository being private controls access but does not replace the source dataset's license,
 terms, attribution, or redistribution requirements. Consult the source dataset before sharing.

@@ -15,7 +15,11 @@ from .data import (
     preprocess_imdb,
     preprocess_sst,
 )
-from .data.preprocessing.common import DEFAULT_PROMPT_TEMPLATE, PAIRING_MODEL_SPECS
+from .data.preprocessing.common import (
+    DEFAULT_MAX_PAIRING_PROMPT_TOKENS,
+    DEFAULT_PROMPT_TEMPLATE,
+    PAIRING_MODEL_SPECS,
+)
 from .devices import resolve_device
 from .directions import list_fitters
 from .experiment import run_reproduction
@@ -49,6 +53,15 @@ def _add_pairing_arguments(
         default=None,
         metavar="MODEL=REVISION",
         help="optional immutable tokenizer revision; repeat per model",
+    )
+    parser.add_argument(
+        "--max-pairing-prompt-tokens",
+        type=int,
+        default=DEFAULT_MAX_PAIRING_PROMPT_TOKENS,
+        help=(
+            "maximum full-prompt length, including BOS, eligible for matched and directed "
+            f"pairs (default: {DEFAULT_MAX_PAIRING_PROMPT_TOKENS})"
+        ),
     )
     if include_prompt_template:
         parser.add_argument(
@@ -385,6 +398,7 @@ def main(argv: list[str] | None = None) -> None:
             binarization=args.binarization,
             pairing_models=args.pairing_model,
             pairing_revisions=args.pairing_revision,
+            max_pairing_prompt_tokens=args.max_pairing_prompt_tokens,
             push_to_hub=args.push_to_hub,
             hub_repo_id=args.hub_repo_id,
             private=not args.public,
@@ -414,6 +428,7 @@ def main(argv: list[str] | None = None) -> None:
             pairing_models=args.pairing_model,
             pairing_revisions=args.pairing_revision,
             pairing_splits=args.pairing_split or ("train", "validation", "test"),
+            max_pairing_prompt_tokens=args.max_pairing_prompt_tokens,
             prompt_template=args.prompt_template,
             push_to_hub=args.push_to_hub,
             hub_repo_id=args.hub_repo_id,
@@ -433,6 +448,7 @@ def main(argv: list[str] | None = None) -> None:
             pairing_models=args.pairing_model,
             pairing_revisions=args.pairing_revision,
             pairing_splits=args.pairing_split or ("test",),
+            max_pairing_prompt_tokens=args.max_pairing_prompt_tokens,
             prompt_template=args.prompt_template,
             filter_model=args.filter_model,
             filter_revision=args.filter_revision,
@@ -457,6 +473,7 @@ def main(argv: list[str] | None = None) -> None:
             pairing_models=args.pairing_model,
             pairing_revisions=args.pairing_revision,
             pairing_splits=args.pairing_split or ("test",),
+            max_pairing_prompt_tokens=args.max_pairing_prompt_tokens,
             prompt_template=args.prompt_template,
             filter_model=args.filter_model,
             filter_revision=args.filter_revision,

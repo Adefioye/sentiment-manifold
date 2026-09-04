@@ -36,6 +36,8 @@ def test_rq2_colab_notebook_covers_preprocessing_private_publish_and_exploration
     ):
         assert command in source
     assert 'FILTER_MODEL = "pythia-2.8b"' in source
+    assert "MAX_PAIRING_PROMPT_TOKENS = 1000" in source
+    assert '"--max-pairing-prompt-tokens", str(MAX_PAIRING_PROMPT_TOKENS)' in source
     assert '"--push-to-hub", "--private"' in source
     assert 'getpass(f"Enter {name} (input hidden): ")' in source
     assert '_RUNTIME_SECRETS[name] = value' in source

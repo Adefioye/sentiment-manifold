@@ -94,6 +94,17 @@ Pin tokenizer versions separately from the correctness-filter model:
 selected tokenizer. Source text is never truncated. Over-context rows are marked and excluded from
 the relevant model's pairs.
 
+Matched and directed pair construction also enforces a full-prompt cap of 1,000 tokens by default,
+including an explicitly prepended BOS token. Override it only as an explicit preprocessing choice:
+
+```bash
+--max-pairing-prompt-tokens 1000
+```
+
+The limit applies under the selected tokenizer for model-specific pairs and under every selected
+tokenizer for common pairs. Base, scored, correct, and `pairing_candidates` configurations retain
+longer rows for provenance; those rows cannot enter matched or directed pairs.
+
 ## AIT V-oc
 
 Use the English train/dev/test gold files from SemEval-2018 Task 1 Affect in Tweets. The official

@@ -24,6 +24,45 @@ causally useful are those directions on SST, IMDb, and DynaSent across model fam
 
 Pythia-2.8B is the default **selection model**, not an additional pairing target.
 
+## Pairing prompt-length policy
+
+GPT-2 Small has the shortest configured context window: 1,024 tokens, including the explicitly
+prepended BOS token. Context limits apply to each complete
+`Review Text: {text} Review Sentiment:` prompt, not to the dataset as a whole.
+
+RQ2 now enforces `max_pairing_prompt_tokens = 1000`: every model-specific matched or directed
+prompt must contain at most 1,000 tokens under its pairing tokenizer, including BOS when that
+tokenizer prepends one. Common pairs must satisfy the same limit under all selected tokenizers.
+The binary, scored, correct, and pairing-candidate configurations retain excluded rows for
+provenance; only examples used in matched/directed intervention pairs are constrained.
+
+An audit of the published IMDb artifact found:
+
+- 945 of the 50,000 binary prompts exceed 1,024 GPT-2 tokens: 493 train and 452 test.
+- Of the 20,533 Pythia-correct test pairing candidates, 408 have more than 1,000 GPT-2 prompt
+  tokens and are ineligible for GPT-2 pairing under the active limit.
+- Before this policy, `gpt2_small_matched_pairs` contained 7,645 matches and 15,290 directed rows.
+  The 1,000-token cap removes eight matches and 16 directed rows, leaving 7,637 and 15,274.
+
+The private IMDb Hub artifact was updated at revision
+`06586d20342aa46fa61525b1f7609ab065983e3e` with these final pair populations:
+
+| Pairing tokenizer | Matched before | Matched after | Directed before | Directed after | Maximum after |
+|---|---:|---:|---:|---:|---:|
+| GPT-2 Small | 7,645 | 7,637 | 15,290 | 15,274 | 990 |
+| Qwen 0.6B | 7,676 | 7,609 | 15,352 | 15,218 | 992 |
+| Gemma 2B | 7,671 | 7,608 | 15,342 | 15,216 | 996 |
+| Pythia 1.4B | 7,630 | 7,558 | 15,260 | 15,116 | 994 |
+| Common | 243 | 243 | 486 | 486 | 520 across its four tokenizers |
+
+The compressed Hub repository decreased from 443,453,737 bytes (422.910 MiB) to 435,374,512
+bytes (415.205 MiB), a reduction of 8,079,225 bytes (7.705 MiB, 1.82%). Binary, scored,
+correct, and pairing-candidate rows did not change.
+
+The threshold uses full-prompt token counts, not raw-review length. It is applied before pair
+construction and recorded in preprocessing metadata. Freeze the resulting population before
+confirmation runs rather than changing the limit after inspecting evaluation results.
+
 ## Guides
 
 - [Preprocessing guide](PREPROCESSING.md): dataset commands, correctness filtering, output

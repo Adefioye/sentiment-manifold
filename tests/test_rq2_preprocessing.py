@@ -161,6 +161,45 @@ def test_over_context_prompts_are_annotated_and_not_paired():
     ) == []
 
 
+def test_pairing_prompt_limit_is_inclusive_and_applies_to_common_pairs():
+    specs = resolve_pairing_models(["gpt2-small", "qwen-0.6b"])
+    rows = []
+    for example_id, label, length in (
+        ("p-at-limit", 1, 1000),
+        ("n-at-limit", 0, 1000),
+        ("p-over-limit", 1, 1001),
+        ("n-over-limit", 0, 1001),
+    ):
+        rows.append(
+            {
+                "example_id": example_id,
+                "text": example_id,
+                "prompt": example_id,
+                "label": label,
+                "split": "test",
+                "gpt2_small_prompt_num_tokens": length,
+                "gpt2_small_fits_context": True,
+                "qwen_0_6b_prompt_num_tokens": length,
+                "qwen_0_6b_fits_context": True,
+            }
+        )
+
+    matches = make_equal_length_matches(
+        rows,
+        dataset_name="fixture",
+        specs=specs,
+        pairing_model="common",
+        splits=("test",),
+        max_prompt_tokens=1000,
+    )
+
+    assert len(matches) == 1
+    assert matches[0]["positive_example_id"] == "p-at-limit"
+    assert matches[0]["negative_example_id"] == "n-at-limit"
+    assert matches[0]["gpt2_small_prompt_num_tokens"] == 1000
+    assert matches[0]["qwen_0_6b_prompt_num_tokens"] == 1000
+
+
 def _write_ait(path, rows, *, dimension="valence"):
     header = "ID\tTweet\tAffect Dimension\tIntensity Class\n"
     body = "".join(
@@ -272,6 +311,7 @@ def test_imdb_pipeline_filters_with_pythia_before_building_test_pairs(tmp_path, 
         "matched_pairs": 1,
         "directed_pairs": 2,
     }
+    assert result.metadata["max_pairing_prompt_tokens"] == 1000
     assert result.metadata["counts"]["pythia_scored_rows"] == 3
     assert result.metadata["counts"]["pythia_correct_rows"] == 2
     assert result.metadata["correctness_filter"]["filter_model_alias"] == "pythia-2.8b"

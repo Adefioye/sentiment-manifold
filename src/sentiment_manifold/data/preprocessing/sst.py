@@ -24,6 +24,7 @@ from ...models.sentiment_filter import (
     score_binary_rows_with_pythia,
 )
 from .common import (
+    DEFAULT_MAX_PAIRING_PROMPT_TOKENS,
     annotate_token_lengths,
     build_pairing_configs,
     parse_revision_overrides,
@@ -455,6 +456,7 @@ def preprocess_sst(
     binarization: str = "both",
     pairing_models: Sequence[str] | None = None,
     pairing_revisions: Sequence[str] | None = None,
+    max_pairing_prompt_tokens: int = DEFAULT_MAX_PAIRING_PROMPT_TOKENS,
     push_to_hub: bool = False,
     hub_repo_id: str | None = None,
     private: bool = True,
@@ -529,6 +531,7 @@ def preprocess_sst(
             dataset_name=f"sst-{method}",
             specs=pairing_specs,
             splits=("test",),
+            max_prompt_tokens=max_pairing_prompt_tokens,
         )
         datasets.update(
             {
@@ -592,6 +595,7 @@ def preprocess_sst(
         "dataset_configs": list(datasets),
         "requested_binarization": binarization,
         "pairing_models": [spec.alias for spec in pairing_specs],
+        "max_pairing_prompt_tokens": max_pairing_prompt_tokens,
         "pairing_tokenizers": pairing_tokenizer_metadata,
         "pairing": (
             "maximal deterministic non-reused opposite-label matches by equal raw and prompt "

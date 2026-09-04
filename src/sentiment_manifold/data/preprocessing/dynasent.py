@@ -30,6 +30,9 @@ def discover_dynasent_files(root: str | Path, rounds: Sequence[int]) -> dict[tup
         raise FileNotFoundError(f"DynaSent root does not exist: {root_path}")
     discovered: dict[tuple[int, str], Path] = {}
     for path in sorted(root_path.rglob("*.jsonl")):
+        relative_parts = path.relative_to(root_path).parts
+        if path.name.startswith("._") or "__MACOSX" in relative_parts:
+            continue
         lower = path.name.lower()
         round_match = re.search(r"(?:round|r)[-_]?0?([12])", lower)
         if not round_match:

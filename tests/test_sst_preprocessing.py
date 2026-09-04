@@ -1,6 +1,7 @@
 from sentiment_manifold.data.preprocessing.sst import (
     NEUTRAL_REMOVED_BINARIZATION,
     TIGGES_BINARIZATION,
+    _dataset_card,
     apply_labels_to_scored_rows,
     binarize_rows,
     binary_label_without_neutral,
@@ -35,6 +36,22 @@ def test_publish_requires_explicit_token():
         assert "token is required" in str(error)
     else:
         raise AssertionError("Publishing without an explicit token should fail")
+
+
+def test_sst_multi_config_card_maps_each_config_to_its_own_directory():
+    card = _dataset_card(
+        {"dataset_configs": ["tigges_binarized", "tigges_common_directed_pairs"]},
+        {},
+    )
+    assert (
+        "- config_name: tigges_binarized\n"
+        "  data_dir: tigges_binarized\n"
+        "  default: true"
+    ) in card
+    assert (
+        "- config_name: tigges_common_directed_pairs\n"
+        "  data_dir: tigges_common_directed_pairs"
+    ) in card
 
 
 def test_token_can_come_from_named_environment_or_token_path(tmp_path, monkeypatch):

@@ -339,7 +339,13 @@ def save_dataset_configs(datasets: Mapping[str, DatasetDict], output_dir: Path) 
 
 
 def make_dataset_card(dataset_name: str, metadata: Mapping[str, Any]) -> str:
-    configs = "\n".join(f"- config_name: {name}" for name in metadata["dataset_configs"])
+    config_blocks = []
+    for index, name in enumerate(metadata["dataset_configs"]):
+        lines = [f"- config_name: {name}", f"  data_dir: {name}"]
+        if index == 0:
+            lines.append("  default: true")
+        config_blocks.append("\n".join(lines))
+    configs = "\n".join(config_blocks)
     filter_metadata = metadata.get("correctness_filter")
     if isinstance(filter_metadata, Mapping):
         selection_note = (
@@ -386,6 +392,7 @@ def publish_dataset_configs(
     private: bool,
     card_text: str,
     token: str,
+    metadata: Mapping[str, Any] | None = None,
 ) -> str:
     if not token:
         raise ValueError("A Hugging Face token is required to publish preprocessed datasets")
@@ -408,6 +415,17 @@ def publish_dataset_configs(
         repo_type="dataset",
         commit_message="Document RQ2 preprocessing configurations",
     )
+    if metadata is not None:
+        published_metadata = {**metadata, "hub_repo_id": repo_id}
+        api.upload_file(
+            path_or_fileobj=(
+                json.dumps(published_metadata, indent=2, sort_keys=True) + "\n"
+            ).encode("utf-8"),
+            path_in_repo="metadata.json",
+            repo_id=repo_id,
+            repo_type="dataset",
+            commit_message="Publish preprocessing provenance",
+        )
     return repo_id
 
 
@@ -442,6 +460,7 @@ def finish_preprocessing(
             private=private,
             card_text=card,
             token=hf_token,
+            metadata=metadata,
         )
         metadata["hub_repo_id"] = published_repo
         (output_path / "metadata.json").write_text(

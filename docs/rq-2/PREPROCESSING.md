@@ -57,6 +57,17 @@ runs all four pipelines, verifies that requested Hub repositories are private, a
 text-free CSV summaries. Because AIT V-oc restricts redistribution, its Hub upload is guarded by
 an explicit permission acknowledgement and remains local by default.
 
+The notebook is divided into two independent parts. Part I performs Colab preprocessing and
+publishing. Part II can be run by itself on a local computer: it imports its own dependencies,
+authenticates to the private Hub repositories, pins their current commits, and loads Parquet files
+from one configuration directory at a time. It does not require `/content`, Google Drive, a project
+checkout, or any source-data repository. This directory-isolated loader also remains compatible
+with repositories published before configuration directories were declared in dataset-card YAML.
+
+Newly published repositories map every configuration to its own `data_dir` and include a root
+`metadata.json` containing preprocessing provenance. This prevents schemas such as `binary` and
+`common_directed_pairs` from being combined by the generic Parquet loader.
+
 ## Pairing tokenizers
 
 The default is all four:

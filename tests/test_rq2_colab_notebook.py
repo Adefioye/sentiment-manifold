@@ -42,9 +42,8 @@ def test_rq2_colab_notebook_covers_preprocessing_private_publish_and_exploration
     assert 'child_env["HF_TOKEN"] = get_runtime_secret("HF_TOKEN")' in source
     assert 'child_env.pop("HF_TOKEN", None)' in source
     assert 'delete_runtime_secret("HF_TOKEN")' in source
-    assert 'os.environ.pop("HF_TOKEN", None)' in source
     assert "AIT_HUB_UPLOAD_PERMISSION_ACKNOWLEDGED" in source
-    assert "get_dataset_config_names" in source
+    assert "hf_hub_download" in source
     assert "load_processed" in source
     assert "GATE_TABLE" in source
     assert "PAIR_TABLE" in source
@@ -70,3 +69,40 @@ def test_rq2_colab_notebook_mounts_drive_and_uses_configured_ait_source():
     assert 'drive.mount(str(DRIVE_MOUNT_ROOT), force_remount=False)' in source
     assert "uploaded = files.upload()" not in source
     assert "from google.colab import files" not in source
+
+
+def test_rq2_exploration_is_standalone_and_configuration_isolated():
+    notebook = _notebook()
+    part_two_index = next(
+        index
+        for index, cell in enumerate(notebook["cells"])
+        if "Part II: standalone local exploration" in "".join(cell.get("source", []))
+    )
+    exploration_code = "\n".join(
+        "".join(cell["source"])
+        for cell in notebook["cells"][part_two_index:]
+        if cell["cell_type"] == "code"
+    )
+
+    for dependency in (
+        "import matplotlib.pyplot as plt",
+        "import pandas as pd",
+        "import seaborn as sns",
+        "from datasets import load_dataset",
+        "from huggingface_hub import HfApi, get_token, hf_hub_download",
+    ):
+        assert dependency in exploration_code
+    for colab_only_name in (
+        "CONTENT_ROOT",
+        "PROJECT_ROOT",
+        "OUTPUTS",
+        "SHOULD_PUSH",
+        "load_from_disk",
+        "git clone",
+    ):
+        assert colab_only_name not in exploration_code
+    assert 'load_dataset("parquet", data_files=data_files)' in exploration_code
+    assert 'SUMMARY_DIR = Path.cwd() / "rq2-data-exploration"' in exploration_code
+    assert "def get_exploration_token():" in exploration_code
+    assert "token=get_exploration_token()" in exploration_code
+    assert "token=_EXPLORATION_TOKEN" not in exploration_code

@@ -9,6 +9,7 @@ checkpoints/
 outputs/**/directions/
 outputs/**/trial_directions/
 data/processed/
+notebooks/rq2-data-exploration/
 
 # dotenv files
 .env

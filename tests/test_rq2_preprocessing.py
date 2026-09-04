@@ -6,11 +6,13 @@ from sentiment_manifold.data.preprocessing.ait import load_ait_binary, preproces
 from sentiment_manifold.data.preprocessing.common import (
     PairingModelSpec,
     annotate_token_lengths,
+    make_dataset_card,
     make_directed_pairs,
     make_equal_length_matches,
     resolve_pairing_models,
 )
 from sentiment_manifold.data.preprocessing.dynasent import (
+    discover_dynasent_files,
     load_dynasent_binary,
     preprocess_dynasent,
 )
@@ -222,6 +224,20 @@ def test_ait_pipeline_saves_binary_and_pairing_configs(tmp_path):
     assert (result.output_dir / "metadata.json").is_file()
 
 
+def test_multi_config_card_maps_each_config_to_its_own_directory():
+    card = make_dataset_card(
+        "Fixture",
+        {
+            "dataset_configs": ["binary", "common_directed_pairs"],
+        },
+    )
+    assert "- config_name: binary\n  data_dir: binary\n  default: true" in card
+    assert (
+        "- config_name: common_directed_pairs\n"
+        "  data_dir: common_directed_pairs"
+    ) in card
+
+
 def test_imdb_normalization_ignores_unsupervised_rows():
     rows = imdb_rows(
         {
@@ -274,6 +290,26 @@ def test_dynasent_keeps_only_gold_binary_labels(tmp_path):
     assert [row["label"] for row in rows[1]] == [1, 0]
     assert removed == {1: 1}
     assert len(checksums[str(source.resolve())]) == 64
+
+
+def test_dynasent_discovery_ignores_macos_appledouble_files(tmp_path):
+    real_root = tmp_path / "dynasent-v1.1"
+    metadata_root = tmp_path / "__MACOSX" / "dynasent-v1.1"
+    real_root.mkdir()
+    metadata_root.mkdir(parents=True)
+    for split in ("train", "dev", "test"):
+        name = f"dynasent-v1.1-round01-yelp-{split}.jsonl"
+        (real_root / name).write_text("{}\n", encoding="utf-8")
+        (metadata_root / f"._{name}").write_bytes(b"\x00\x05\x16\x07appledouble")
+
+    discovered = discover_dynasent_files(tmp_path, rounds=(1,))
+
+    assert set(discovered) == {
+        (1, "train"),
+        (1, "validation"),
+        (1, "test"),
+    }
+    assert all("__MACOSX" not in path.parts for path in discovered.values())
 
 
 def test_dynasent_pipeline_keeps_rounds_separate_and_filters_pairs(tmp_path, monkeypatch):

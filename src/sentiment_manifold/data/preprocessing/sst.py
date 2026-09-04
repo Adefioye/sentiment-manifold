@@ -332,9 +332,13 @@ def _single_test_dataset(rows: list[dict[str, Any]]) -> DatasetDict:
 
 
 def _dataset_card(metadata: dict[str, Any], counts: dict[str, Any]) -> str:
-    config_lines = "\n".join(
-        f"- config_name: {name}" for name in metadata["dataset_configs"]
-    )
+    config_blocks = []
+    for index, name in enumerate(metadata["dataset_configs"]):
+        lines = [f"- config_name: {name}", f"  data_dir: {name}"]
+        if index == 0:
+            lines.append("  default: true")
+        config_blocks.append("\n".join(lines))
+    config_lines = "\n".join(config_blocks)
     return f"""---
 language:
 - en
@@ -398,6 +402,7 @@ def publish_dataset_configs(
     card_text: str,
     token: str,
     default_repo_name: str = "sentiment-manifold-sst-pythia-2.8b",
+    metadata: Mapping[str, Any] | None = None,
 ) -> str:
     """Create a Hub dataset repository and upload every intermediate config."""
     if not token:
@@ -422,6 +427,17 @@ def publish_dataset_configs(
         repo_type="dataset",
         commit_message="Document SST preprocessing and dataset configurations",
     )
+    if metadata is not None:
+        published_metadata = {**metadata, "hub_repo_id": repo_id}
+        api.upload_file(
+            path_or_fileobj=(
+                json.dumps(published_metadata, indent=2, sort_keys=True) + "\n"
+            ).encode("utf-8"),
+            path_in_repo="metadata.json",
+            repo_id=repo_id,
+            repo_type="dataset",
+            commit_message="Publish SST preprocessing provenance",
+        )
     return repo_id
 
 
@@ -599,6 +615,7 @@ def preprocess_sst(
             default_repo_name=(
                 f"sentiment-manifold-sst-{model_metadata['filter_model_alias']}"
             ),
+            metadata=metadata,
         )
         metadata["hub_repo_id"] = published_repo
         (output_dir / "metadata.json").write_text(

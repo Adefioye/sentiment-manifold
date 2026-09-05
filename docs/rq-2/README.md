@@ -5,6 +5,16 @@
 How well do valence directions learned from AIT V-oc align with sentiment directions, and how
 causally useful are those directions on SST, IMDb, and DynaSent across model families?
 
+Use Difference-in-means, logistic regression and DAS fitting methods for learning `sentiment direction` and `valence direction`.
+
+- [ ] **1.** For a start, I want to fit the three methods on ToyMovieReview datasets to learn sentiment sentiment direction using `gpt2-small and qwen-0.6b`, check first, middle and last layer similarity of sentiment directions and then test out logit difference and logit flip percent by patching all token positions. However, the activations used for the fitting methods would be extracted from [last token position] and [adjective] position in the prompt. Ideally, I want to know which of the activations provide better on in-distribution and out-distribution ToyMovieReview and SST datasets respectively.
+
+- [ ] **2.** Secondly, we would then train the 3 methods to learn sentiment and valence direction using ToyMovieReview and AIT respectively for all 4 models. Here, we use about same amount of datasets for training both directions. What this means is, roughly about 55 data samples for both ToyMovieReview and AIT. We observe the effect on logit difference and logit flip percent. The method of extracting activations for learning sentiment direction depends on which performs best from 1 above. For valence direction, activation extraction should involve all activations of all tokens per data sample and then averaging them to train the fitting methods.
+
+- [ ] **3.** Thirdly, we can then train on large amount of the data samples on AIT and observe if there is discernible performance on eval datasets like ToyMovieReview and SST using metrics we have been using above.
+
+- [ ] **4.** Run first, middle, and last layer within-model geometric alignment for sentiment directions and secondly the same layer within-model geometric alignments for sentiment and valence directions.
+
 ## Data contract
 
 - AIT V-oc is the supervised valence-direction training dataset. Its gold ordinal labels are

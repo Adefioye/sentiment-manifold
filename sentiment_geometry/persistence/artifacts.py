@@ -9,6 +9,8 @@ from typing import Any
 
 import pandas as pd
 
+from .writes import staged_path, write_text_atomic
+
 
 class RunArtifactStore:
     """Write named artifacts beneath one run directory."""
@@ -19,12 +21,12 @@ class RunArtifactStore:
 
     def write_json(self, filename: str, payload: Mapping[str, Any]) -> Path:
         path = self.run_dir / filename
-        path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-        return path
+        return write_text_atomic(path, json.dumps(payload, indent=2, sort_keys=True))
 
     def write_rows(self, filename: str, rows: Sequence[Mapping[str, Any]]) -> Path:
         path = self.run_dir / filename
-        pd.DataFrame(rows).to_csv(path, index=False)
+        with staged_path(path) as temporary:
+            pd.DataFrame(rows).to_csv(temporary, index=False)
         return path
 
 

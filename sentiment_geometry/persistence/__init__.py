@@ -7,11 +7,14 @@ from .paths import (
     resolve_checkpoint_dir,
     resolve_output_dir,
 )
+from .runs import TimestampedRunLayout, prepare_timestamped_run
 
 __all__ = [
     "RunArtifactStore",
+    "TimestampedRunLayout",
     "checkpoint_variant_dir",
     "maybe_mount_google_drive",
+    "prepare_timestamped_run",
     "resolve_checkpoint_dir",
     "resolve_output_dir",
 ]

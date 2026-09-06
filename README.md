@@ -33,6 +33,8 @@ correctness-filtered. The explicit Pythia-1.4B option above preserves the separa
 For Colab, use the
 [`RQ1 SST-to-GPT-2 notebook`](notebooks/01_colab_sst_to_gpt2_results.ipynb) or the
 [`RQ2 preprocess, private-publish, and explore notebook`](notebooks/02_colab_preprocess_publish_explore_rq2.ipynb).
+The complete two-model sentiment-position experiment is available in the
+[`sentiment-position comparison notebook`](notebooks/03_colab_sentiment_position_comparison.ipynb).
 
 ## Documentation
 

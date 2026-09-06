@@ -106,6 +106,11 @@ fails if any one of them cannot produce tokenizer-compatible, equal-length direc
 
 The complete configuration is in
 [`configs/sentiment_position_comparison.yaml`](../../configs/sentiment_position_comparison.yaml).
+The step-by-step
+[`Colab sentiment-position notebook`](../../notebooks/03_colab_sentiment_position_comparison.ipynb)
+runs both pinned models and writes every direction, result table, manifest, and figure directly to
+a collision-safe, minute-stamped Google Drive directory. Its artifact audit expects 72 GPT-2 Small
+directions and 168 Qwen3-0.6B directions.
 The same workflow is available as a regular Python API:
 
 ```python

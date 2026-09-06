@@ -9,6 +9,8 @@ from typing import Any
 
 import numpy as np
 
+from ..persistence.writes import staged_path
+
 
 @dataclass
 class DirectionArtifact:
@@ -35,10 +37,14 @@ class DirectionArtifact:
 
     def save(self, path: str | Path) -> Path:
         path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
         header = asdict(self)
         header.pop("vector")
-        np.savez_compressed(path, vector=self.vector, metadata=json.dumps(header, sort_keys=True))
+        with staged_path(path) as temporary, temporary.open("wb") as handle:
+            np.savez_compressed(
+                handle,
+                vector=self.vector,
+                metadata=json.dumps(header, sort_keys=True),
+            )
         return path
 
     @classmethod

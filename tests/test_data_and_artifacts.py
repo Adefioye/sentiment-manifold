@@ -52,6 +52,7 @@ def test_direction_artifact_round_trip(tmp_path):
     restored = DirectionArtifact.load(path)
     np.testing.assert_allclose(restored.vector, [0.6, 0.8])
     assert restored.metadata == {"score": 1.0}
+    assert not list(tmp_path.glob("*.tmp"))
 
 
 def test_subspace_direction_artifact_round_trip(tmp_path):

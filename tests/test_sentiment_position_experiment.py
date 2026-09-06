@@ -1,3 +1,4 @@
+import json
 from argparse import Namespace
 from pathlib import Path
 
@@ -14,6 +15,7 @@ from sentiment_geometry.experiments import (
     SentimentPositionExperiment,
     SentimentPositionExperimentConfig,
 )
+from sentiment_geometry.experiments.sentiment_position import audit_direction_artifacts
 from sentiment_geometry.experiments.sentiment_position.config import (
     REQUIRED_TOY_EVALUATIONS,
     apply_config_overrides,
@@ -248,3 +250,57 @@ def test_activation_position_api_supports_focus_and_final():
     torch.testing.assert_close(
         CausalLMAdapter.activation_positions(batch, "final"), torch.tensor([2, 1])
     )
+
+
+def test_direction_artifact_audit_checks_every_configured_combination(tmp_path):
+    results_dir = tmp_path / "results"
+    model_dir = results_dir / "gpt2-small"
+    direction_dir = tmp_path / "directions"
+    model_dir.mkdir(parents=True)
+    direction_dir.mkdir()
+    (results_dir / "run_manifest.json").write_text(
+        json.dumps({"models": ["gpt2-small"]})
+    )
+    (model_dir / "resolved_config.json").write_text(
+        json.dumps(
+            {
+                "sweep": {
+                    "methods": ["mean_diff", "das"],
+                    "fit_positions": ["adjective", "final"],
+                },
+                "resolved_layers": [1, 2],
+            }
+        )
+    )
+    rows = []
+    for position in ("adjective", "final"):
+        for method in ("mean_diff", "das"):
+            for layer in (1, 2):
+                path = direction_dir / f"{position}-{method}-layer{layer:02d}.npz"
+                path.touch()
+                rows.append(
+                    {
+                        "fit_position": position,
+                        "method": method,
+                        "layer": layer,
+                        "artifact_path": path,
+                    }
+                )
+    pd.DataFrame(rows).to_csv(model_dir / "direction_metadata.csv", index=False)
+
+    audit = audit_direction_artifacts(results_dir)
+
+    audit.require_complete()
+    assert audit.complete
+    assert audit.expected_total == 8
+    assert audit.summary.iloc[0].to_dict() == {
+        "model": "gpt2-small",
+        "expected_artifacts": 8,
+        "recorded_artifacts": 8,
+        "existing_artifacts": 8,
+        "missing_combinations": 0,
+        "unexpected_combinations": 0,
+        "duplicate_records": 0,
+        "missing_files": 0,
+        "complete": True,
+    }

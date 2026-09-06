@@ -243,6 +243,9 @@ class SentimentPositionExperiment:
                 "raw_orientation_dot": artifact.metadata.get("raw_orientation_dot"),
                 "train_accuracy": artifact.metadata.get("train_accuracy"),
                 "artifact_path": str(fitted.checkpoint_path),
+                "artifact_relative_path": str(
+                    fitted.checkpoint_path.relative_to(self.config.sweep.checkpoint_dir)
+                ),
             }
         )
         tables.das_losses.extend(

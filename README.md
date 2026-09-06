@@ -35,6 +35,8 @@ For Colab, use the
 [`RQ2 preprocess, private-publish, and explore notebook`](notebooks/02_colab_preprocess_publish_explore_rq2.ipynb).
 The complete two-model sentiment-position experiment is available in the
 [`sentiment-position comparison notebook`](notebooks/03_colab_sentiment_position_comparison.ipynb).
+Explore a completed Drive run without writing new artifacts using the
+[`sentiment-position results notebook`](notebooks/04_colab_explore_sentiment_position_results.ipynb).
 
 ## Documentation
 

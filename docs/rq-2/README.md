@@ -111,6 +111,10 @@ The step-by-step
 runs both pinned models and writes every direction, result table, manifest, and figure directly to
 a collision-safe, minute-stamped Google Drive directory. Its artifact audit expects 72 GPT-2 Small
 directions and 168 Qwen3-0.6B directions.
+The read-only
+[`sentiment-position exploration notebook`](../../notebooks/04_colab_explore_sentiment_position_results.ipynb)
+displays Figure 4-style best-layer tables, cosine similarities, and model-by-position layer curves
+from a completed Drive run without saving additional analysis artifacts.
 The same workflow is available as a regular Python API:
 
 ```python

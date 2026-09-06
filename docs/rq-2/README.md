@@ -7,7 +7,7 @@ causally useful are those directions on SST, IMDb, and DynaSent across model fam
 
 Use Difference-in-means, logistic regression and DAS fitting methods for learning `sentiment direction` and `valence direction`.
 
-- [ ] **1.** For a start, I want to fit the three methods on ToyMovieReview datasets to learn sentiment sentiment direction using `gpt2-small and qwen-0.6b`, check first, middle and last layer similarity of sentiment directions and then test out logit difference and logit flip percent by patching all token positions. However, the activations used for the fitting methods would be extracted from [last token position] and [adjective] position in the prompt. Ideally, I want to know which of the activations provide better on in-distribution and out-distribution ToyMovieReview and SST datasets respectively.
+- [x] **1.** For a start, I want to fit the three methods on ToyMovieReview datasets to learn sentiment sentiment direction using `gpt2-small and qwen-0.6b`, check first, middle and last layer similarity of sentiment directions and then test out logit difference and logit flip percent by patching all token positions. However, the activations used for the fitting methods would be extracted from [last token position] and [adjective] position in the prompt. Ideally, I want to know which of the activations provide better on in-distribution and out-distribution ToyMovieReview and SST datasets respectively.
 
 - [ ] **2.** Secondly, we would then train the 3 methods to learn sentiment and valence direction using ToyMovieReview and AIT respectively for all 4 models. Here, we use about same amount of datasets for training both directions. What this means is, roughly about 55 data samples for both ToyMovieReview and AIT. We observe the effect on logit difference and logit flip percent. The method of extracting activations for learning sentiment direction depends on which performs best from 1 above. For valence direction, activation extraction should involve all activations of all tokens per data sample and then averaging them to train the fitting methods.
 
@@ -87,3 +87,64 @@ confirmation runs rather than changing the limit after inspecting evaluation res
 Preprocessing and tokenizer-aware pair construction are implemented. Direction fitting and causal
 evaluation on these RQ2 artifacts should preserve train/validation/test separation and freeze the
 chosen pair policy before confirmation runs.
+
+## Question 1 experiment
+
+Question 1 uses the domain-named sentiment-position comparison API so it does not alter the RQ1
+reproduction protocol. It fits mean difference, logistic regression, and one-dimensional DAS
+independently at the adjective and final prompt-token positions. It sweeps residual boundaries
+`1..n_layers`; boundary `0` is the embedding residual and is excluded. All-token directional
+patching is then run on four required evaluation panels:
+
+1. held-out ToyMovieReview adjectives;
+2. all eight paper-era ToyMovieReview verbs, subject to the upstream one-token filter;
+3. the upstream SimpleAdverb vocabulary, deduplicated and subject to its exact two-token filter;
+4. the model-specific SST `directed_pairs` configuration from the private Hugging Face dataset.
+
+The Toy adjective, verb, and adverb panels are mandatory rather than optional command flags. A run
+fails if any one of them cannot produce tokenizer-compatible, equal-length directional cases.
+
+The complete configuration is in
+[`configs/sentiment_position_comparison.yaml`](../../configs/sentiment_position_comparison.yaml).
+The same workflow is available as a regular Python API:
+
+```python
+from sentiment_geometry.experiments import (
+    SentimentPositionExperiment,
+    SentimentPositionExperimentConfig,
+)
+
+config = SentimentPositionExperimentConfig.load(
+    "configs/sentiment_position_comparison.yaml"
+)
+SentimentPositionExperiment(config).run()
+```
+
+Run the explicit, full experiment command with:
+
+```bash
+./scripts/run_sentiment_position_comparison.sh
+```
+
+The script passes both models, all three methods, both fitting positions, the complete non-embedding
+layer sweep, fitting hyperparameters, SST repository, authentication environment variable, output
+directory, and checkpoint directory explicitly. `HF_TOKEN` or `HF_TOKEN_PATH` must provide access
+to the private SST repository. Checkpoints are resumable.
+
+Each model directory saves `resolved_config.json`, `dataset_summary.csv`, `prompt_manifest.csv`,
+`pair_manifest.csv`, `toy_vocabulary.csv`, `answer_tokens.csv`, `direction_metadata.csv`,
+`das_losses.csv`, `patching_records.csv`, `metrics.csv`, `direction_similarities.csv`, and
+`best_layers.csv`. The best logit-difference and logit-flip boundaries are selected independently
+for every model × method × fitting-position × evaluation-dataset cell. Absolute cosine is the
+primary similarity at boundaries `[1, floor(n_layers/2), n_layers]`; signed cosine is retained for
+audit.
+
+Plots are recreated only from saved tables:
+
+```bash
+sentiment-geometry plot --run-dir outputs/sentiment-position-comparison/gpt2-small
+sentiment-geometry plot --run-dir outputs/sentiment-position-comparison/qwen-0.6b
+```
+
+The implementation is complete and smoke-tested. The checkmark records implementation completion;
+the full GPU experiment and its scientific interpretation are still pending.

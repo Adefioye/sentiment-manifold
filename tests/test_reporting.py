@@ -3,7 +3,7 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from sentiment_manifold.reporting import select_table1_best_layers, table1_cell_text
+from sentiment_geometry.reporting import select_table1_best_layers, table1_cell_text
 
 
 def _layer_metrics() -> pd.DataFrame:

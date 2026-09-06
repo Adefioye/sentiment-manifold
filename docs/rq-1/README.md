@@ -44,19 +44,19 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -e '.[dev,notebooks]'
 
-sentiment-manifold inspect-data --config configs/reproduction.yaml --model gpt2-small
-sentiment-manifold preprocess-sst --binarization both \
+sentiment-geometry inspect-data --config configs/reproduction.yaml --model gpt2-small
+sentiment-geometry preprocess-sst --binarization both \
   --filter-model pythia-1.4b --output-dir data/processed/sst-pythia-1.4b
-sentiment-manifold reproduce --config configs/reproduction.yaml --model gpt2-small --device auto
-sentiment-manifold plot --run-dir outputs/results/gpt2-small
+sentiment-geometry reproduce --config configs/reproduction.yaml --model gpt2-small --device auto
+sentiment-geometry plot --run-dir outputs/results/gpt2-small
 ```
 
 For the 28-layer Qwen3-0.6B base checkpoint:
 
 ```bash
-sentiment-manifold inspect-data --config configs/qwen_reproduction.yaml --model qwen-0.6b
-sentiment-manifold reproduce --config configs/qwen_reproduction.yaml --model qwen-0.6b --device auto
-sentiment-manifold plot --run-dir outputs/results/qwen-0.6b
+sentiment-geometry inspect-data --config configs/qwen_reproduction.yaml --model qwen-0.6b
+sentiment-geometry reproduce --config configs/qwen_reproduction.yaml --model qwen-0.6b --device auto
+sentiment-geometry plot --run-dir outputs/results/qwen-0.6b
 ```
 
 Use `--device auto`, `cuda`, `mps`, or `cpu`. Automatic selection prefers CUDA, then MPS, then CPU.
@@ -73,7 +73,7 @@ Supply a write-capable token through a secret environment variable; do not paste
 token into a notebook cell or shell command:
 
 ```bash
-HF_TOKEN="$MY_HF_WRITE_TOKEN" sentiment-manifold preprocess-sst \
+HF_TOKEN="$MY_HF_WRITE_TOKEN" sentiment-geometry preprocess-sst \
   --filter-model pythia-1.4b --output-dir data/processed/sst-pythia-1.4b \
   --push-to-hub --private
 ```
@@ -82,7 +82,7 @@ Here `MY_HF_WRITE_TOKEN` should already have been populated by a password manage
 Colab secret. If `HF_TOKEN` is already exported, run:
 
 ```bash
-sentiment-manifold preprocess-sst \
+sentiment-geometry preprocess-sst \
   --filter-model pythia-1.4b --output-dir data/processed/sst-pythia-1.4b \
   --push-to-hub --private
 ```
@@ -90,10 +90,10 @@ sentiment-manifold preprocess-sst \
 A differently named secret and Hugging Face's token-file convention are also supported:
 
 ```bash
-sentiment-manifold preprocess-sst --filter-model pythia-1.4b \
+sentiment-geometry preprocess-sst --filter-model pythia-1.4b \
   --output-dir data/processed/sst-pythia-1.4b --push-to-hub --private \
   --hf-token-env MY_PRIVATE_HF_TOKEN
-HF_TOKEN_PATH=/run/secrets/huggingface-token sentiment-manifold preprocess-sst \
+HF_TOKEN_PATH=/run/secrets/huggingface-token sentiment-geometry preprocess-sst \
   --filter-model pythia-1.4b --output-dir data/processed/sst-pythia-1.4b \
   --push-to-hub --private
 ```
@@ -136,11 +136,11 @@ candidate_pool = load_dataset(
 ## Principal reproduction commands
 
 ```bash
-sentiment-manifold inspect-data --config configs/reproduction.yaml
-sentiment-manifold preprocess-sst --binarization both \
+sentiment-geometry inspect-data --config configs/reproduction.yaml
+sentiment-geometry preprocess-sst --binarization both \
   --filter-model pythia-1.4b --output-dir data/processed/sst-pythia-1.4b
-sentiment-manifold reproduce --config configs/reproduction.yaml --model gpt2-small --device auto
-sentiment-manifold plot --run-dir outputs/results/gpt2-small
+sentiment-geometry reproduce --config configs/reproduction.yaml --model gpt2-small --device auto
+sentiment-geometry plot --run-dir outputs/results/gpt2-small
 ```
 
 For individual mean-difference, K-means, logistic-regression, PCA, DAS, and random-control runs, use
@@ -153,7 +153,7 @@ unrelated OpenWebText examples while preserving the orthogonal activation compon
 resulting language-model-loss increase alongside matched random-direction controls.
 
 ```bash
-sentiment-manifold reproduce \
+sentiment-geometry reproduce \
   --config configs/reproduction.yaml \
   --model gpt2-small \
   --with-openwebtext-resample-ablation
@@ -185,10 +185,10 @@ run's `figures/` directory.
 In Colab, lightweight result files can remain local while fitted directions persist on Drive:
 
 ```bash
-sentiment-manifold reproduce \
+sentiment-geometry reproduce \
   --config configs/reproduction.yaml \
   --model gpt2-small \
-  --checkpoint-dir /content/drive/MyDrive/sentiment-manifold/checkpoints
+  --checkpoint-dir /content/drive/MyDrive/sentiment-geometry/checkpoints
 ```
 
 ## Reproducibility boundary

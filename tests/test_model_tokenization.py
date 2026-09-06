@@ -1,8 +1,9 @@
-import torch
 from types import SimpleNamespace
 
-from sentiment_manifold.models.huggingface import CausalLMAdapter
-from sentiment_manifold.types import TextExample
+import torch
+
+from sentiment_geometry.datasets import TextExample
+from sentiment_geometry.models.huggingface import CausalLMAdapter
 
 
 class _ToyTokenizer:
@@ -49,9 +50,7 @@ def test_prepend_bos_matches_transformerlens_and_shifts_focus_position():
 def test_gpt_neox_architecture_is_supported_for_pythia():
     layers = [object(), object()]
     norm = object()
-    model = SimpleNamespace(
-        gpt_neox=SimpleNamespace(layers=layers, final_layer_norm=norm)
-    )
+    model = SimpleNamespace(gpt_neox=SimpleNamespace(layers=layers, final_layer_norm=norm))
     found_layers, found_norm = CausalLMAdapter._find_transformer_parts(model)
     assert found_layers is layers
     assert found_norm is norm

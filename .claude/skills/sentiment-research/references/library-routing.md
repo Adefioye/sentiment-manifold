@@ -3,7 +3,7 @@
 | Need | Preferred local choice | Guardrail |
 |---|---|---|
 | Exact historical GPT-2 reproduction | `../eliciting-latent-sentiment` and its pinned TransformerLens fork | Do not mix modern hook semantics into a numerical replication claim. |
-| Shared GPT-2/Qwen experiment | `sentiment_manifold.models.CausalLMAdapter` on Hugging Face Transformers | Keep architecture branching inside the adapter. |
+| Shared GPT-2/Qwen experiment | `sentiment_geometry.models.CausalLMAdapter` on Hugging Face Transformers | Keep architecture branching inside the adapter. |
 | Quick cache, logit-lens, and component exploration | Modern TransformerLens / TransformerBridge | Validate hook-name and layer-boundary equivalence before comparing historical numbers. |
 | General PyTorch/Hugging Face interventions | NNsight | Prefer when model coverage or remote execution matters more than exact legacy parity. |
 | Interchange interventions and trained subspaces | PyVene through Causalab | Use for DAS/DBM and serializable intervention graphs; preserve task-level counterfactual semantics. |

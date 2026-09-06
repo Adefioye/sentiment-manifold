@@ -1,0 +1,49 @@
+seed: 0
+
+models:
+  - name: gpt2-small
+    revision: 607a30d783dfa663caf39e06633721c8d4cfcd7e
+    prepend_bos: true
+    device: auto
+    dtype: auto
+    batch_size: 16
+  - name: qwen-0.6b
+    revision: da87bfb608c14b7cf20ba1ce41287e8de496c0cd
+    prepend_bos: false
+    device: auto
+    dtype: auto
+    batch_size: 16
+
+data:
+  toy_config: data/toy_movie_review.yaml
+  sst_repo_id: kokolamba/sentiment-manifold-sst-pythia-2.8b
+  sst_revision: bcffb933a34a48b409a7caf3a53f0fe7bb8152cc
+  sst_split: test
+  sst_configs:
+    gpt2-small: tigges_gpt2_small_directed_pairs
+    qwen-0.6b: tigges_qwen_0_6b_directed_pairs
+  sst_max_directed_cases: null
+  hf_token_env: HF_TOKEN
+
+sweep:
+  # Boundary 0 is the embedding residual and is deliberately excluded.
+  layers: all_non_embedding
+  methods: [mean_diff, logistic_regression, das]
+  fit_positions: [adjective, final]
+  output_dir: outputs/sentiment-position-comparison
+  checkpoint_dir: checkpoints/sentiment-position-comparison
+  resume: true
+
+fitting:
+  logistic_c: 1.0
+  logistic_solver: liblinear
+  logistic_max_iter: 1000
+  logistic_tol: 0.0001
+
+das:
+  epochs: 64
+  learning_rate: 0.001
+  weight_decay: 0.0
+  batch_size: 128
+  max_grad_norm: 1.0
+  implementation: tigges_rotation

@@ -1,6 +1,7 @@
-# Sentiment Manifold
+# Sentiment Geometry
 
-Research code for reproducible causal studies of sentiment representations in language models.
+Research code for reproducible causal studies of sentiment directions, subspaces, and manifolds in
+language models.
 The current implemented research question reproduces the essential sentiment-direction experiments
 from Tigges et al., *Language Models Linearly Represent Sentiment*, and RQ2 preprocessing for
 GPT-2 Small, Qwen3-0.6B Base, Gemma 2B, and Pythia 1.4B.
@@ -13,11 +14,14 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -e '.[dev,notebooks]'
 
-sentiment-manifold inspect-data --model gpt2-small
-sentiment-manifold preprocess-sst --binarization both \
+sentiment-geometry inspect-data --model gpt2-small
+sentiment-geometry preprocess-sst --binarization both \
   --filter-model pythia-1.4b --output-dir data/processed/sst-pythia-1.4b
-sentiment-manifold reproduce --config configs/reproduction.yaml --model gpt2-small
-sentiment-manifold plot --run-dir outputs/results/gpt2-small
+sentiment-geometry reproduce --config configs/reproduction.yaml --model gpt2-small
+sentiment-geometry plot --run-dir outputs/results/gpt2-small
+
+# Both models, all methods/positions/layers, and all required evaluations
+./scripts/run_sentiment_position_comparison.sh
 ```
 
 Model aliases are `gpt2-small`, `qwen-0.6b`, `gemma-2b`, and `pythia-1.4b`. Commands support CUDA,
@@ -36,11 +40,12 @@ For Colab, use the
   [full reproduction protocol](docs/rq-1/REPRODUCTION.md),
   [per-method commands and optional tuning](docs/rq-1/METHOD_COMMANDS.md), and
   [implementation details](docs/rq-1/IMPLEMENTATION.md).
-- **RQ2 — valence/sentiment alignment data:**
+- **RQ2 — valence/sentiment alignment and causal experiments:**
   [overview](docs/rq-2/README.md) and
   [AIT, SST, IMDb, and DynaSent preprocessing guide](docs/rq-2/PREPROCESSING.md).
 - **Sentiment-manifold research program:**
   [research questions, methodology, diagnostics, and roadmap](docs/rq-sentiment-manifolds/README.md).
+- **Code organization:** [domain boundaries and dependency rules](docs/ARCHITECTURE.md).
 
 Planned work will keep separate research-question directories for geometric alignment between
 valence and sentiment directions and for nonlinear/manifold representations of sentiment.

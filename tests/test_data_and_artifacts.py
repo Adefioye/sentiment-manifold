@@ -2,10 +2,9 @@ from pathlib import Path
 
 import numpy as np
 
-from sentiment_manifold.artifacts import DirectionArtifact
-from sentiment_manifold.config import ExperimentConfig, ReproductionConfig
-from sentiment_manifold.data.toy_movie_review import load_toy_movie_review
-
+from sentiment_geometry.datasets.toy_movie_review import load_toy_movie_review
+from sentiment_geometry.experiments.reproduction import ExperimentConfig, ReproductionConfig
+from sentiment_geometry.fitting_methods import DirectionArtifact
 
 PROJECT_ROOT = Path(__file__).parents[1]
 

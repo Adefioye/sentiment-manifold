@@ -346,7 +346,7 @@ Treat model and layer as replication axes. A method selected at a different best
 
 ### New task package
 
-Create a future `causalab/causalab/tasks/sentiment_manifold/` package with:
+Create a future `causalab/causalab/tasks/sentiment_geometry/` package with:
 
 - `causal_models.py`: line, valence–mixedness, valence–arousal, and operator-composition DAGs;
 - `templates.py`: exact Tigges templates plus graded/compositional extensions;

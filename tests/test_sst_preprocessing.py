@@ -1,4 +1,7 @@
-from sentiment_manifold.data.preprocessing.sst import (
+from typing import ClassVar
+
+from sentiment_geometry.cli.main import _token_from_environment
+from sentiment_geometry.datasets.preprocessing.sst import (
     NEUTRAL_REMOVED_BINARIZATION,
     TIGGES_BINARIZATION,
     _dataset_card,
@@ -10,12 +13,11 @@ from sentiment_manifold.data.preprocessing.sst import (
     remove_neutral,
     tigges_binary_label,
 )
-from sentiment_manifold.cli import _token_from_environment
 
 
 class _WhitespaceTokenizer:
     bos_token_id = 99
-    init_kwargs = {"_commit_hash": "fake-tokenizer-revision"}
+    init_kwargs: ClassVar[dict[str, str]] = {"_commit_hash": "fake-tokenizer-revision"}
 
     def __len__(self):
         return 100
@@ -28,7 +30,7 @@ class _WhitespaceTokenizer:
 
 
 def test_publish_requires_explicit_token():
-    from sentiment_manifold.data.preprocessing.sst import publish_dataset_configs
+    from sentiment_geometry.datasets.preprocessing.sst import publish_dataset_configs
 
     try:
         publish_dataset_configs({}, repo_id="example/repo", private=True, card_text="", token="")
@@ -44,13 +46,10 @@ def test_sst_multi_config_card_maps_each_config_to_its_own_directory():
         {},
     )
     assert (
-        "- config_name: tigges_binarized\n"
-        "  data_dir: tigges_binarized\n"
-        "  default: true"
+        "- config_name: tigges_binarized\n  data_dir: tigges_binarized\n  default: true"
     ) in card
     assert (
-        "- config_name: tigges_common_directed_pairs\n"
-        "  data_dir: tigges_common_directed_pairs"
+        "- config_name: tigges_common_directed_pairs\n  data_dir: tigges_common_directed_pairs"
     ) in card
 
 
@@ -122,9 +121,7 @@ def test_shared_pythia_scores_are_relabelled_and_refiltered_per_variant():
             "predicted_label": 1,
         }
     ]
-    tigges = binarize_rows(
-        [{"example_id": "tie", "sentiment_score": 0.5}], TIGGES_BINARIZATION
-    )
+    tigges = binarize_rows([{"example_id": "tie", "sentiment_score": 0.5}], TIGGES_BINARIZATION)
     rebound = apply_labels_to_scored_rows(scored, tigges)
     assert rebound[0]["label"] == 0
     assert rebound[0]["signed_correct_logit_diff"] == -2.0
@@ -132,7 +129,7 @@ def test_shared_pythia_scores_are_relabelled_and_refiltered_per_variant():
 
 
 def test_preprocess_saves_complete_config_family_for_both_methods(tmp_path, monkeypatch):
-    import sentiment_manifold.data.preprocessing.sst as module
+    import sentiment_geometry.datasets.preprocessing.sst as module
 
     source_rows = []
     for index, score in enumerate((0.4, 0.5, 0.6, 0.8), start=1):

@@ -33,7 +33,7 @@ Pin `--filter-revision` for reportable runs. Pythia-1.4B remains available only 
 separate Tigges RQ1 SST reproduction:
 
 ```bash
-sentiment-manifold preprocess-sst \
+sentiment-geometry preprocess-sst \
   --filter-model pythia-1.4b \
   --output-dir data/processed/sst-pythia-1.4b
 ```
@@ -113,7 +113,7 @@ files have a `.txt` extension but contain four **tab-delimited** columns: `ID`, 
 document preview is not equivalent to the source file.
 
 ```bash
-sentiment-manifold preprocess-ait \
+sentiment-geometry preprocess-ait \
   --ait-root data/raw/ait \
   --output-dir data/processed/ait-valence-binary
 ```
@@ -121,7 +121,7 @@ sentiment-manifold preprocess-ait \
 When discovery is ambiguous, provide all three paths explicitly:
 
 ```bash
-sentiment-manifold preprocess-ait \
+sentiment-geometry preprocess-ait \
   --train-file data/raw/ait/2018-Valence-oc-En-train.txt \
   --validation-file data/raw/ait/2018-Valence-oc-En-dev.txt \
   --test-file data/raw/ait/2018-Valence-oc-En-test-gold.txt
@@ -136,7 +136,7 @@ retained verbatim—including emojis, mentions, hashtags, punctuation, and strin
 ## SST
 
 ```bash
-sentiment-manifold preprocess-sst \
+sentiment-geometry preprocess-sst \
   --sst-root ../eliciting-latent-sentiment/stanfordSentimentTreebank \
   --binarization both \
   --output-dir data/processed/sst-pythia-2.8b
@@ -150,7 +150,7 @@ and paired.
 ## IMDb
 
 ```bash
-sentiment-manifold preprocess-imdb \
+sentiment-geometry preprocess-imdb \
   --dataset-name stanfordnlp/imdb \
   --output-dir data/processed/imdb-pythia-2.8b
 ```
@@ -164,7 +164,7 @@ with `--dataset-revision REVISION`.
 Download and extract `dynasent-v1.1.zip` from the official DynaSent repository, then run:
 
 ```bash
-sentiment-manifold preprocess-dynasent \
+sentiment-geometry preprocess-dynasent \
   --dynasent-root data/raw/dynasent \
   --output-dir data/processed/dynasent-r1-r2-pythia-2.8b
 ```
@@ -206,7 +206,7 @@ population.
 To publish privately:
 
 ```bash
-sentiment-manifold preprocess-imdb --push-to-hub --private
+sentiment-geometry preprocess-imdb --push-to-hub --private
 ```
 
 Set `--hub-repo-id ACCOUNT/REPOSITORY` to override the generated repository name.

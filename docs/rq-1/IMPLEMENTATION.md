@@ -2,7 +2,7 @@
 
 ## What is implemented
 
-The package supplies a shared Hugging Face backend for GPT-2 Small (`gpt2`) and the 28-layer Qwen3-0.6B base model (`Qwen/Qwen3-0.6B-Base`). The base checkpoint is used for a fairer continuation-model comparison with GPT-2; the post-trained chat checkpoint would be a separate experiment. The adapter exposes residual boundaries `0..n_layers`, activation extraction, and scoped activation editing without model-specific logic leaking into fitters or evaluations.
+The package supplies a shared Hugging Face backend for GPT-2 Small (`gpt2`) and the 28-layer Qwen3-0.6B base model (`Qwen/Qwen3-0.6B-Base`). The base checkpoint is used for a fairer continuation-model comparison with GPT-2; the post-trained chat checkpoint would be a separate experiment. The adapter exposes residual boundaries `0..n_layers` and scoped activation editing, while the activation package owns batched extraction without model-specific logic leaking into fitters or evaluations.
 
 The configured Tigges direction sweep contains:
 
@@ -47,14 +47,19 @@ does not select one direction for reuse across datasets or metrics.
 ## Package map
 
 ```text
-src/sentiment_manifold/
-├── data/          ToyMovieReview, SST, OpenWebText
-├── models/        Hugging Face residual-boundary adapter
-├── directions/    common fitter API, four linear fits, DAS
-├── evaluation/    projections, causal patching, OWT ablation
-├── experiment.py  configured all-layer sweep
-├── plotting.py    causal curves, DAS loss curves, and similarity heatmaps
-└── storage.py     separate local-result and persistent-checkpoint routing
+sentiment_geometry/
+├── datasets/         ToyMovieReview, SST, OpenWebText, and preprocessing
+├── models/           Hugging Face adapters, model configuration, and devices
+├── activations/      model-independent batched activation extraction
+├── fitting_methods/  common fitter API, linear fits, DAS, and direction artifacts
+├── interventions/    directional and subspace activation replacement
+├── evaluation/       causal patching and language-model diagnostics
+├── analysis/         projections and direction/subspace similarities
+├── selection/        validation-only tuning and frozen confirmation
+├── experiments/      configuration-driven scientific workflows
+├── reporting/        result selection, tables, and plots
+├── persistence/      checkpoint and result-path conventions
+└── cli/              thin command-line adapters
 ```
 
 Notebooks call these APIs rather than defining separate experiment implementations. `AGENTS.md` and

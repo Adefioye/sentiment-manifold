@@ -20,10 +20,13 @@ Never describe probe accuracy, PCA layout, UMAP, reconstruction, or feature corr
 
 ## Implement through stable boundaries
 
-- Put dataset parsing and pairing in `src/sentiment_manifold/data/`.
-- Put model architecture and hook differences in `src/sentiment_manifold/models/`.
+- Put dataset parsing and pairing in `sentiment_geometry/datasets/`.
+- Put model architecture and hook differences in `sentiment_geometry/models/` and reusable
+  activation collection in `sentiment_geometry/activations/`.
 - Expose every fitting method through a normalized, positive-oriented direction artifact.
-- Put causal metrics in `src/sentiment_manifold/evaluation/`; do not bury them in notebooks.
+- Put tensor-editing operators in `sentiment_geometry/interventions/`, causal metrics in
+  `sentiment_geometry/evaluation/`, and correlational geometry in `sentiment_geometry/analysis/`.
+  Do not bury any of these in notebooks.
 - Keep notebooks thin: call package APIs, visualize saved tables, and avoid unique experiment logic.
 - Route all paths and sweeps through `configs/reproduction.yaml`.
 - Preserve `cuda`/`mps`/`cpu` behavior and avoid unconditional CUDA calls.

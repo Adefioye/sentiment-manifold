@@ -23,13 +23,13 @@ eight verbs are `enjoyed`, `loved`, `liked`, `appreciated`, `admired`, `hated`, 
 ## Commands
 
 ```bash
-sentiment-manifold inspect-data --config configs/reproduction.yaml
-sentiment-manifold preprocess-sst --binarization both \
+sentiment-geometry inspect-data --config configs/reproduction.yaml
+sentiment-geometry preprocess-sst --binarization both \
   --filter-model pythia-1.4b --output-dir data/processed/sst-pythia-1.4b
-sentiment-manifold reproduce --config configs/reproduction.yaml --model gpt2-small --device auto
-sentiment-manifold reproduce --config configs/reproduction.yaml --model qwen-0.6b --device auto
-sentiment-manifold reproduce --config configs/reproduction.yaml --model gpt2-small --with-openwebtext-resample-ablation
-sentiment-manifold plot --run-dir outputs/results/gpt2-small
+sentiment-geometry reproduce --config configs/reproduction.yaml --model gpt2-small --device auto
+sentiment-geometry reproduce --config configs/reproduction.yaml --model qwen-0.6b --device auto
+sentiment-geometry reproduce --config configs/reproduction.yaml --model gpt2-small --with-openwebtext-resample-ablation
+sentiment-geometry plot --run-dir outputs/results/gpt2-small
 ```
 
 For separate commands for mean difference, K-means, logistic regression, PCA, DAS 1D/2D/3D, and
@@ -43,11 +43,11 @@ The last command is optional and exploratory; it is not the paper's core OpenWeb
 Install the project editable in Colab and call `maybe_mount_google_drive(True)` only when persistent
 checkpoints are wanted. Keep `experiment.output_dir: outputs/results` so CSVs, JSON metadata, and
 plots remain on the Colab instance. Set `experiment.checkpoint_dir`, pass `--checkpoint-dir`, or set
-`SENTIMENT_MANIFOLD_CHECKPOINT_DIR` to
-`/content/drive/MyDrive/sentiment-manifold/checkpoints`. The run notebook performs this split when
+`SENTIMENT_GEOMETRY_CHECKPOINT_DIR` to
+`/content/drive/MyDrive/sentiment-geometry/checkpoints`. The run notebook performs this split when
 `USE_GOOGLE_DRIVE = True`.
 
-`SENTIMENT_MANIFOLD_OUTPUT_DIR` controls the lightweight result root only. Pointing that variable at
+`SENTIMENT_GEOMETRY_OUTPUT_DIR` controls the lightweight result root only. Pointing that variable at
 Drive still moves all results to Drive, so it should normally remain unset in Colab. The automatic
 layout is model-scoped:
 
@@ -107,7 +107,7 @@ Normalized 1D vectors and orthonormal DAS subspace bases are saved separately un
 checkpoint root. `direction_metadata.csv` records their exact paths. Validation tuning similarly
 stores trial direction checkpoints outside its result directory.
 
-`sentiment-manifold plot` consumes these saved CSVs and writes the causal layer curves, a rendered
+`sentiment-geometry plot` consumes these saved CSVs and writes the causal layer curves, a rendered
 Table 1-style best-result table, DAS loss curves, and direction-similarity heatmaps under `figures/`;
 it does not rerun an experiment.
 

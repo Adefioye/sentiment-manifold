@@ -19,14 +19,14 @@ Run commands from the `sentiment-manifold` directory after installing the packag
 Use a distinct output directory for each method:
 
 ```bash
-sentiment-manifold reproduce --config configs/reproduction.yaml --model gpt2-small --method mean_diff --output-dir outputs/results/by-method/mean_diff
-sentiment-manifold reproduce --config configs/reproduction.yaml --model gpt2-small --method kmeans --output-dir outputs/results/by-method/kmeans
-sentiment-manifold reproduce --config configs/reproduction.yaml --model gpt2-small --method logistic_regression --output-dir outputs/results/by-method/logistic_regression
-sentiment-manifold reproduce --config configs/reproduction.yaml --model gpt2-small --method pca --output-dir outputs/results/by-method/pca
-sentiment-manifold reproduce --config configs/reproduction.yaml --model gpt2-small --method das --output-dir outputs/results/by-method/das
-sentiment-manifold reproduce --config configs/reproduction.yaml --model gpt2-small --method das2d --output-dir outputs/results/by-method/das2d
-sentiment-manifold reproduce --config configs/reproduction.yaml --model gpt2-small --method das3d --output-dir outputs/results/by-method/das3d
-sentiment-manifold reproduce --config configs/reproduction.yaml --model gpt2-small --method random --output-dir outputs/results/by-method/random
+sentiment-geometry reproduce --config configs/reproduction.yaml --model gpt2-small --method mean_diff --output-dir outputs/results/by-method/mean_diff
+sentiment-geometry reproduce --config configs/reproduction.yaml --model gpt2-small --method kmeans --output-dir outputs/results/by-method/kmeans
+sentiment-geometry reproduce --config configs/reproduction.yaml --model gpt2-small --method logistic_regression --output-dir outputs/results/by-method/logistic_regression
+sentiment-geometry reproduce --config configs/reproduction.yaml --model gpt2-small --method pca --output-dir outputs/results/by-method/pca
+sentiment-geometry reproduce --config configs/reproduction.yaml --model gpt2-small --method das --output-dir outputs/results/by-method/das
+sentiment-geometry reproduce --config configs/reproduction.yaml --model gpt2-small --method das2d --output-dir outputs/results/by-method/das2d
+sentiment-geometry reproduce --config configs/reproduction.yaml --model gpt2-small --method das3d --output-dir outputs/results/by-method/das3d
+sentiment-geometry reproduce --config configs/reproduction.yaml --model gpt2-small --method random --output-dir outputs/results/by-method/random
 ```
 
 Each directory contains a `gpt2-small/best_layers.csv`. These commands still scan every layer. The
@@ -37,9 +37,9 @@ For a fixed, manually chosen configuration, command-line overrides are available
 for diagnostics, but a value chosen after looking at test results is not a clean tuned result:
 
 ```bash
-sentiment-manifold reproduce --config configs/reproduction.yaml --method kmeans --kmeans-n-init 50 --output-dir outputs/results/manual/kmeans-n50
-sentiment-manifold reproduce --config configs/reproduction.yaml --method logistic_regression --logistic-c 0.1 --output-dir outputs/results/manual/logistic-c0.1
-sentiment-manifold reproduce --config configs/reproduction.yaml --method das --das-learning-rate 0.0003 --das-epochs 32 --output-dir outputs/results/manual/das-lr3e-4-e32
+sentiment-geometry reproduce --config configs/reproduction.yaml --method kmeans --kmeans-n-init 50 --output-dir outputs/results/manual/kmeans-n50
+sentiment-geometry reproduce --config configs/reproduction.yaml --method logistic_regression --logistic-c 0.1 --output-dir outputs/results/manual/logistic-c0.1
+sentiment-geometry reproduce --config configs/reproduction.yaml --method das --das-learning-rate 0.0003 --das-epochs 32 --output-dir outputs/results/manual/das-lr3e-4-e32
 ```
 
 Changing one of these options invalidates an incompatible saved direction, so `resume: true` cannot
@@ -53,13 +53,13 @@ and PCA have no fitted hyperparameters, so their tuning commands select only a l
 Stochastic methods are compared by the mean validation score across three seeds.
 
 ```bash
-sentiment-manifold tune --config configs/tuning.yaml --method mean_diff
-sentiment-manifold tune --config configs/tuning.yaml --method kmeans
-sentiment-manifold tune --config configs/tuning.yaml --method logistic_regression
-sentiment-manifold tune --config configs/tuning.yaml --method pca
-sentiment-manifold tune --config configs/tuning.yaml --method das
-sentiment-manifold tune --config configs/tuning.yaml --method das2d
-sentiment-manifold tune --config configs/tuning.yaml --method das3d
+sentiment-geometry tune --config configs/tuning.yaml --method mean_diff
+sentiment-geometry tune --config configs/tuning.yaml --method kmeans
+sentiment-geometry tune --config configs/tuning.yaml --method logistic_regression
+sentiment-geometry tune --config configs/tuning.yaml --method pca
+sentiment-geometry tune --config configs/tuning.yaml --method das
+sentiment-geometry tune --config configs/tuning.yaml --method das2d
+sentiment-geometry tune --config configs/tuning.yaml --method das3d
 ```
 
 DAS tuning is expensive: with the supplied grid, one DAS dimension requires 13 layers × 4
@@ -75,8 +75,8 @@ Each tuning run writes results to `outputs/results/tuning/gpt2-small/<method>/`:
 - per-pair patching records and DAS loss histories make selection auditable.
 
 Trial directions are stored under the separate checkpoint root. In Colab, pass
-`--checkpoint-dir /content/drive/MyDrive/sentiment-manifold/checkpoints` or set
-`SENTIMENT_MANIFOLD_CHECKPOINT_DIR` so only those reusable artifacts go to Drive.
+`--checkpoint-dir /content/drive/MyDrive/sentiment-geometry/checkpoints` or set
+`SENTIMENT_GEOMETRY_CHECKPOINT_DIR` so only those reusable artifacts go to Drive.
 
 The default selection outcome is Toy validation logit-difference recovery. To select by the
 paper-style logit-flip score instead, set:
@@ -95,11 +95,11 @@ Confirmation reads exactly one row, refits that method at the selected layer on 
 training examples, then evaluates ToyMovieReview test and SST test. Give it a new output directory:
 
 ```bash
-sentiment-manifold confirm --config configs/reproduction.yaml --selection outputs/results/tuning/gpt2-small/kmeans/selected_configs.csv --output-dir outputs/results/confirmed/kmeans
-sentiment-manifold confirm --config configs/reproduction.yaml --selection outputs/results/tuning/gpt2-small/logistic_regression/selected_configs.csv --output-dir outputs/results/confirmed/logistic_regression
-sentiment-manifold confirm --config configs/reproduction.yaml --selection outputs/results/tuning/gpt2-small/das/selected_configs.csv --output-dir outputs/results/confirmed/das
-sentiment-manifold confirm --config configs/reproduction.yaml --selection outputs/results/tuning/gpt2-small/das2d/selected_configs.csv --output-dir outputs/results/confirmed/das2d
-sentiment-manifold confirm --config configs/reproduction.yaml --selection outputs/results/tuning/gpt2-small/das3d/selected_configs.csv --output-dir outputs/results/confirmed/das3d
+sentiment-geometry confirm --config configs/reproduction.yaml --selection outputs/results/tuning/gpt2-small/kmeans/selected_configs.csv --output-dir outputs/results/confirmed/kmeans
+sentiment-geometry confirm --config configs/reproduction.yaml --selection outputs/results/tuning/gpt2-small/logistic_regression/selected_configs.csv --output-dir outputs/results/confirmed/logistic_regression
+sentiment-geometry confirm --config configs/reproduction.yaml --selection outputs/results/tuning/gpt2-small/das/selected_configs.csv --output-dir outputs/results/confirmed/das
+sentiment-geometry confirm --config configs/reproduction.yaml --selection outputs/results/tuning/gpt2-small/das2d/selected_configs.csv --output-dir outputs/results/confirmed/das2d
+sentiment-geometry confirm --config configs/reproduction.yaml --selection outputs/results/tuning/gpt2-small/das3d/selected_configs.csv --output-dir outputs/results/confirmed/das3d
 ```
 
 The confirmation `best_layers.csv` has four paper metrics but only the frozen layer, so it reports

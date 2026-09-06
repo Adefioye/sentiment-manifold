@@ -1,7 +1,7 @@
-from datasets import Dataset, DatasetDict
 import pytest
+from datasets import Dataset, DatasetDict
 
-from sentiment_manifold.data.sst import load_processed_sst_candidates
+from sentiment_geometry.datasets.sst import load_processed_sst_candidates
 
 
 def test_load_processed_sst_candidates_requires_pythia_correct_classification_prompts(tmp_path):

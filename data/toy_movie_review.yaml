@@ -24,3 +24,17 @@ verbs:
     [enjoyed, loved, liked, appreciated, admired]
   negative:
     [hated, disliked, despised]
+adverb_template: "The traveller {adverb} walked to their destination. The traveller felt very"
+adverb_answers:
+  positive: [" happy", " good", " comfortable", " excited"]
+  negative: [" sad", " bad", " uncomfortable", " scared"]
+adverbs:
+  positive:
+    [amusingly, blissfully, buoyantly, cheerfully, comically, delightedly,
+     euphorically, gleefully, gleefully, humorously, jokingly, joyfully, joyously,
+     lightheartedly, merrily, playfuly, radiantly, sportively, triumphantly]
+  negative:
+    [corruptly, demonically, devilishly, disgustingly, dreadfully, fearfully,
+     fearingly, frightenedly, frightfully, grimly, gruesomely, horrendously,
+     horrifically, unjustly, monstrously, odiously, obscenely, outrageously,
+     perversely, sadistically, scandalously, shamefully]

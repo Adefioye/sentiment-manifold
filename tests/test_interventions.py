@@ -1,14 +1,14 @@
 import pytest
 import torch
 
-from sentiment_manifold.directions.das import directional_replace
-from sentiment_manifold.evaluation.patching import (
+from sentiment_geometry.evaluation.patching import (
     PatchingResult,
     _centered_target_signed_margins,
     _logit_differences,
     _target_directed_logit_flips,
     _target_signed_margins,
 )
+from sentiment_geometry.interventions import directional_replace
 
 
 def test_directional_replace_preserves_orthogonal_component():

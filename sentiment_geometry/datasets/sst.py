@@ -1,0 +1,254 @@
+"""Stanford Sentiment Treebank loader matching the paper's binary collapse."""
+
+from __future__ import annotations
+
+import csv
+import os
+import random
+from collections import defaultdict
+from pathlib import Path
+
+from datasets import DatasetDict, load_dataset, load_from_disk
+from huggingface_hub import snapshot_download
+
+from .types import CounterfactualPair, TextExample
+
+SPLIT_NAMES = {1: "train", 2: "test", 3: "dev"}
+
+
+def _read_phrase_scores(root: Path) -> dict[str, float]:
+    scores_by_id: dict[int, float] = {}
+    with (root / "sentiment_labels.txt").open(encoding="utf-8") as handle:
+        next(handle)
+        for line in handle:
+            phrase_id, score = line.rstrip("\n").split("|")
+            scores_by_id[int(phrase_id)] = float(score)
+    scores: dict[str, float] = {}
+    dictionary = root / "dictionary_fixed.txt"
+    if not dictionary.exists():
+        dictionary = root / "dictionary.txt"
+    with dictionary.open(encoding="utf-8") as handle:
+        for line in handle:
+            phrase, phrase_id = line.rstrip("\n").rsplit("|", 1)
+            if int(phrase_id) in scores_by_id and phrase not in scores:
+                scores[phrase] = scores_by_id[int(phrase_id)]
+    return scores
+
+
+def load_sst(
+    root: str | Path,
+    split: str = "dev",
+    *,
+    scaffold: str = "continuation",
+) -> list[TextExample]:
+    """Load full sentences, discard neutral labels, and apply the paper scaffold."""
+    root = Path(root)
+    if not root.exists():
+        raise FileNotFoundError(
+            f"SST root does not exist: {root}. Set data.sst_root in the config."
+        )
+    scores = _read_phrase_scores(root)
+    sentence_file = root / "datasetSentences_fixed.txt"
+    if not sentence_file.exists():
+        sentence_file = root / "datasetSentences.txt"
+    sentences: dict[int, str] = {}
+    with sentence_file.open(encoding="utf-8") as handle:
+        reader = csv.DictReader(handle, delimiter="\t")
+        for row in reader:
+            sentences[int(row["sentence_index"])] = row["sentence"]
+    split_ids: dict[int, str] = {}
+    with (root / "datasetSplit.txt").open(encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            split_ids[int(row["sentence_index"])] = SPLIT_NAMES[int(row["splitset_label"])]
+
+    suffix = " Overall the movie was just very" if scaffold == "continuation" else ""
+    examples: list[TextExample] = []
+    for sentence_id, sentence in sentences.items():
+        if split_ids.get(sentence_id) != split or sentence not in scores:
+            continue
+        score = scores[sentence]
+        if score <= 0.4:
+            label = 0
+        elif score >= 0.6:
+            label = 1
+        else:
+            continue
+        text = sentence + suffix
+        examples.append(
+            TextExample(
+                text=text,
+                label=label,
+                example_id=f"sst-{split}-{sentence_id}",
+                metadata={"sentence": sentence, "score": score, "split": split},
+            )
+        )
+    return examples
+
+
+def pair_sst_by_token_length(
+    examples: list[TextExample],
+    tokenizer,
+    *,
+    max_pairs: int | None = None,
+    seed: int = 0,
+) -> list[CounterfactualPair]:
+    """Pair positive/negative examples with equal token length in both directions."""
+    buckets: dict[tuple[int, int], list[TextExample]] = defaultdict(list)
+    for example in examples:
+        length = len(tokenizer(example.text, add_special_tokens=True)["input_ids"])
+        buckets[(length, example.label)].append(example)
+    rng = random.Random(seed)
+    pairs: list[CounterfactualPair] = []
+    lengths = sorted({length for length, _ in buckets})
+    for length in lengths:
+        positive = buckets[(length, 1)]
+        negative = buckets[(length, 0)]
+        rng.shuffle(positive)
+        rng.shuffle(negative)
+        for pos, neg in zip(positive, negative):
+            pairs.extend(
+                (
+                    CounterfactualPair(clean=pos, corrupted=neg),
+                    CounterfactualPair(clean=neg, corrupted=pos),
+                )
+            )
+            if max_pairs is not None and len(pairs) >= 2 * max_pairs:
+                return pairs[: 2 * max_pairs]
+    return pairs
+
+
+def load_processed_sst_candidates(
+    processed_dir: str | Path,
+    *,
+    config_name: str = "tigges_pythia_correct",
+    split: str = "test",
+) -> list[TextExample]:
+    """Load a saved, Pythia-correct SST candidate configuration for evaluation."""
+    config_path = Path(processed_dir) / config_name
+    if not config_path.exists():
+        raise FileNotFoundError(
+            f"Processed SST configuration does not exist: {config_path}. Run "
+            "`sentiment-geometry preprocess-sst` before reproduction."
+        )
+    loaded = load_from_disk(str(config_path))
+    if isinstance(loaded, DatasetDict):
+        if split not in loaded:
+            raise ValueError(f"Processed SST configuration {config_name!r} has no {split!r} split")
+        dataset = loaded[split]
+    else:
+        dataset = loaded
+
+    examples: list[TextExample] = []
+    for row in dataset:
+        if row.get("split", split) != split:
+            continue
+        if "pythia_correct" not in row or not bool(row["pythia_correct"]):
+            raise ValueError(
+                f"SST evaluation requires a Pythia-correct config; invalid row "
+                f"{row.get('example_id')!r}"
+            )
+        prompt = row.get("prompt")
+        if not prompt:
+            raise ValueError(f"Processed SST row {row.get('example_id')!r} has no prompt")
+        examples.append(
+            TextExample(
+                text=str(prompt),
+                label=int(row["label"]),
+                example_id=str(row["example_id"]),
+                metadata={
+                    "sentence": row["text"],
+                    "score": float(row["sentiment_score"]),
+                    "split": split,
+                    "binarization_method": row.get("binarization_method"),
+                    "pythia_correct": True,
+                    "pythia_raw_num_tokens": row.get("pythia_raw_num_tokens"),
+                    "pythia_prompt_num_tokens": row.get("pythia_prompt_num_tokens"),
+                },
+            )
+        )
+    if not examples:
+        raise RuntimeError(f"Processed SST configuration {config_name!r} has no usable rows")
+    return examples
+
+
+def load_hf_directed_pairs(
+    repo_id: str,
+    *,
+    config_name: str,
+    split: str = "test",
+    revision: str | None = None,
+    token: str | None = None,
+    max_pairs: int | None = None,
+) -> list[CounterfactualPair]:
+    """Load the materialized RQ2 Hugging Face directed-pair configuration."""
+
+    snapshot = Path(
+        snapshot_download(
+            repo_id,
+            repo_type="dataset",
+            revision=revision,
+            token=token,
+            allow_patterns=f"{config_name}/{split}-*.parquet",
+            local_files_only=os.environ.get("HF_HUB_OFFLINE", "").lower() in {"1", "true", "yes"},
+        )
+    )
+    parquet_files = sorted((snapshot / config_name).glob(f"{split}-*.parquet"))
+    if not parquet_files:
+        raise FileNotFoundError(f"No Parquet shards found for {repo_id}/{config_name}:{split}")
+    dataset = load_dataset(
+        "parquet",
+        data_files={split: [str(path) for path in parquet_files]},
+        split=split,
+    )
+    resolved_revision = snapshot.name
+    pairs: list[CounterfactualPair] = []
+    for row in dataset:
+        if {"source_prompt", "target_prompt"} <= set(row):
+            clean_prefix, corrupted_prefix = "source", "target"
+        elif {"clean_prompt", "corrupted_prompt"} <= set(row):
+            clean_prefix, corrupted_prefix = "clean", "corrupted"
+        else:
+            raise ValueError(
+                f"Directed-pair row {row.get('case_id')!r} has no supported prompt schema"
+            )
+        clean_label = int(row[f"{clean_prefix}_label"])
+        corrupted_label = int(row[f"{corrupted_prefix}_label"])
+        case_id = str(row.get("case_id", f"sst-directed-{len(pairs):05d}"))
+        common_metadata = {
+            "case_id": case_id,
+            "pair_id": row.get("pair_id"),
+            "direction": row.get("direction"),
+            "split": row.get("split", split),
+            "pairing_model": row.get("pairing_model"),
+            "dataset_repo_id": repo_id,
+            "dataset_config": config_name,
+            "requested_dataset_revision": revision,
+            "resolved_dataset_revision": resolved_revision,
+        }
+        clean = TextExample(
+            text=str(row[f"{clean_prefix}_prompt"]),
+            label=clean_label,
+            example_id=str(row.get(f"{clean_prefix}_example_id", f"{case_id}-clean")),
+            metadata={
+                **common_metadata,
+                "source_text": row.get(f"{clean_prefix}_text"),
+                "pair_role": "activation_donor",
+            },
+        )
+        corrupted = TextExample(
+            text=str(row[f"{corrupted_prefix}_prompt"]),
+            label=corrupted_label,
+            example_id=str(row.get(f"{corrupted_prefix}_example_id", f"{case_id}-corrupted")),
+            metadata={
+                **common_metadata,
+                "source_text": row.get(f"{corrupted_prefix}_text"),
+                "pair_role": "receiver_baseline",
+            },
+        )
+        pairs.append(CounterfactualPair(clean=clean, corrupted=corrupted))
+        if max_pairs is not None and len(pairs) >= max_pairs:
+            break
+    if not pairs:
+        raise RuntimeError(f"{repo_id}/{config_name}:{split} contains no directed pairs")
+    return pairs

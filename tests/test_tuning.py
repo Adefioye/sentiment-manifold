@@ -4,15 +4,14 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from sentiment_manifold.config import ReproductionConfig
-from sentiment_manifold.data import load_toy_movie_review
-from sentiment_manifold.tuning import (
+from sentiment_geometry.datasets import load_toy_movie_review
+from sentiment_geometry.experiments.reproduction import ReproductionConfig
+from sentiment_geometry.selection.hyperparameters import (
     apply_selected_configuration,
     select_validation_configuration,
     split_toy_training_examples,
     tuning_grid,
 )
-
 
 PROJECT_ROOT = Path(__file__).parents[1]
 

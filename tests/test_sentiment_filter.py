@@ -1,9 +1,10 @@
 from types import SimpleNamespace
+from typing import ClassVar
 
 import pytest
 import torch
 
-from sentiment_manifold.models.sentiment_filter import (
+from sentiment_geometry.models.sentiment_filter import (
     score_binary_rows_with_pythia,
 )
 
@@ -14,7 +15,7 @@ class _FilterTokenizer:
     eos_token = "<eos>"
     pad_token_id = None
     model_max_length = 9
-    init_kwargs = {"_commit_hash": "tokenizer-revision"}
+    init_kwargs: ClassVar[dict[str, str]] = {"_commit_hash": "tokenizer-revision"}
 
     def __call__(self, text, *, add_special_tokens=False):
         if text == " Positive":
@@ -66,7 +67,7 @@ class _FilterModel:
 
 
 def test_shared_filter_scores_gold_labels_and_skips_over_context_rows(monkeypatch):
-    import sentiment_manifold.models.sentiment_filter as module
+    import sentiment_geometry.models.sentiment_filter as module
 
     tokenizer = _FilterTokenizer()
     monkeypatch.setattr(
@@ -110,7 +111,7 @@ def test_shared_filter_scores_gold_labels_and_skips_over_context_rows(monkeypatc
 
 
 def test_shared_filter_rejects_non_binary_labels(monkeypatch):
-    import sentiment_manifold.models.sentiment_filter as module
+    import sentiment_geometry.models.sentiment_filter as module
 
     monkeypatch.setattr(
         module.AutoTokenizer,

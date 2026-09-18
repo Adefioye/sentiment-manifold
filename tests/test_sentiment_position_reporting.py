@@ -15,7 +15,7 @@ from sentiment_geometry.reporting import (
     plot_logit_difference_grid,
 )
 
-POSITIONS = ("adjective", "final")
+POSITIONS = ("adjective", "verb", "summary", "final")
 METHODS = ("mean_diff", "logistic_regression", "das")
 LAYERS = (1, 2, 3)
 
@@ -177,9 +177,9 @@ def test_read_only_plotters_return_expected_figure_layouts(tmp_path):
         dataset="toy_adjectives",
     )
 
-    assert len(cosine.axes) == 7  # Six heatmaps and one shared color bar.
+    assert len(cosine.axes) == 13  # Twelve heatmaps and one shared color bar.
     assert len(cross_position.axes) == 1
-    assert len(layers.axes) == 4
+    assert len(layers.axes) == 8
     assert set(tmp_path.rglob("*")) == files_before
     plt.close(cosine)
     plt.close(cross_position)

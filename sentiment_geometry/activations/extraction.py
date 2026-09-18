@@ -11,7 +11,7 @@ import torch
 from ..datasets.types import TextExample
 from ..models import CausalLMAdapter
 
-ActivationPosition = Literal["focus", "final"]
+ActivationPosition = Literal["focus", "adjective", "verb", "summary", "final"]
 
 
 def extract_activations(

@@ -174,13 +174,12 @@ class DirectionFitService:
                 seed=self.config.seed,
             )
         )
-        extraction_position = "focus" if request.fit_position == "adjective" else "final"
         return fitter.fit(
             self.adapter,
             list(request.pairs),
             layer=request.layer,
             answers=request.answers,
-            position=extraction_position,
+            position=request.fit_position,
         )
 
 

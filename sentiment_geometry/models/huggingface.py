@@ -20,6 +20,7 @@ class TokenizedBatch:
     input_ids: Tensor
     attention_mask: Tensor
     focus_positions: Tensor | None = None
+    named_positions: dict[str, Tensor] | None = None
 
     def to(self, device: torch.device) -> TokenizedBatch:
         return TokenizedBatch(
@@ -28,6 +29,9 @@ class TokenizedBatch:
             focus_positions=None
             if self.focus_positions is None
             else self.focus_positions.to(device),
+            named_positions=None
+            if self.named_positions is None
+            else {name: positions.to(device) for name, positions in self.named_positions.items()},
         )
 
 
@@ -145,6 +149,7 @@ class CausalLMAdapter:
                 (torch.zeros((offsets.shape[0], 1, 2), dtype=offsets.dtype), offsets), dim=1
             )
         focus_positions: Tensor | None = None
+        named_positions: dict[str, Tensor] | None = None
         if examples and isinstance(examples[0], TextExample):
             positions = []
             for example, row in zip(examples, offsets):
@@ -161,10 +166,42 @@ class CausalLMAdapter:
                     raise ValueError(f"Could not locate focus span in {example.example_id}")
                 positions.append(overlaps[-1])
             focus_positions = torch.tensor(positions, dtype=torch.long)
+            span_names = tuple(
+                sorted(
+                    {
+                        name
+                        for example in examples
+                        if isinstance(example, TextExample)
+                        for name in example.named_spans
+                    }
+                )
+            )
+            named_positions = {}
+            for name in span_names:
+                positions = []
+                for example, row in zip(examples, offsets):
+                    assert isinstance(example, TextExample)
+                    span = example.named_spans.get(name)
+                    if span is None:
+                        positions.append(-1)
+                        continue
+                    span_start, span_end = span
+                    overlaps = [
+                        index
+                        for index, (start, end) in enumerate(row.tolist())
+                        if end > span_start and start < span_end
+                    ]
+                    if not overlaps:
+                        raise ValueError(
+                            f"Could not locate named span {name!r} in {example.example_id}"
+                        )
+                    positions.append(overlaps[-1])
+                named_positions[name] = torch.tensor(positions, dtype=torch.long)
         return TokenizedBatch(
             input_ids=encoded["input_ids"],
             attention_mask=encoded["attention_mask"],
             focus_positions=focus_positions,
+            named_positions=named_positions,
         )
 
     def single_token_id(self, text: str) -> int:
@@ -190,7 +227,18 @@ class CausalLMAdapter:
             return batch.focus_positions
         if position == "final":
             return cls.last_positions(batch.attention_mask)
-        raise ValueError("Activation position must be 'focus' or 'final'")
+        if batch.named_positions is not None and position in batch.named_positions:
+            positions = batch.named_positions[position]
+            if (positions < 0).any():
+                raise ValueError(
+                    f"Named position {position!r} is unavailable for one or more examples"
+                )
+            return positions
+        available = sorted(batch.named_positions or {})
+        raise ValueError(
+            "Activation position must be 'focus', 'final', or an available named position; "
+            f"got {position!r}, available named positions are {available}"
+        )
 
     def boundary_module(self, layer: int):
         if layer < 0 or layer > self.n_layers:

@@ -83,13 +83,13 @@ def test_public_api_uses_domain_names():
     assert SentimentPositionExperiment.__name__ == "SentimentPositionExperiment"
 
 
-def test_config_runs_both_positions_methods_and_non_embedding_layers():
+def test_config_runs_all_positions_methods_and_non_embedding_layers():
     config = SentimentPositionExperimentConfig.load(
         PROJECT_ROOT / "configs/sentiment_position_comparison.yaml"
     )
     assert [model.name for model in config.models] == ["gpt2-small", "qwen-0.6b"]
     assert config.sweep.methods == ["mean_diff", "logistic_regression", "das"]
-    assert config.sweep.fit_positions == ["adjective", "final"]
+    assert config.sweep.fit_positions == ["adjective", "verb", "summary", "final"]
     assert config.layers_for(4) == [1, 2, 3, 4]
     with pytest.raises(ValueError, match="boundary 0 is excluded"):
         config.sweep.layers = [0, 1]
@@ -109,7 +109,7 @@ def test_explicit_full_run_flags_preserve_the_complete_grid():
         checkpoint_dir=None,
         seed=3,
         method=["mean_diff", "logistic_regression", "das"],
-        fit_position=["adjective", "final"],
+        fit_position=["adjective", "verb", "summary", "final"],
         all_non_embedding_layers=True,
         layer=None,
         logistic_c=0.5,
@@ -128,7 +128,7 @@ def test_explicit_full_run_flags_preserve_the_complete_grid():
     overridden = apply_config_overrides(config, args)
     assert overridden.sweep.layers == "all_non_embedding"
     assert overridden.sweep.methods == ["mean_diff", "logistic_regression", "das"]
-    assert overridden.sweep.fit_positions == ["adjective", "final"]
+    assert overridden.sweep.fit_positions == ["adjective", "verb", "summary", "final"]
     assert overridden.data.sst_max_directed_cases == 8
     assert all(model.device == "cpu" for model in overridden.models)
 
@@ -143,6 +143,8 @@ def test_full_run_script_passes_the_complete_experiment_grid_explicitly():
         "--method logistic_regression",
         "--method das",
         "--fit-position adjective",
+        "--fit-position verb",
+        "--fit-position summary",
         "--fit-position final",
         "--all-non-embedding-layers",
         "--batch-size 16",
@@ -168,6 +170,21 @@ def test_toy_evaluations_always_include_adjectives_verbs_and_adverbs():
         )
         == 1
     )
+
+
+def test_toy_training_prompts_record_adj_vrb_and_second_movie_sum_spans():
+    dataset = load_toy_movie_review(PROJECT_ROOT / "data/toy_movie_review.yaml")
+    example = dataset.train[0]
+
+    adjective_start, adjective_end = example.named_spans["adjective"]
+    verb_start, verb_end = example.named_spans["verb"]
+    summary_start, summary_end = example.named_spans["summary"]
+
+    assert example.text[adjective_start:adjective_end] == example.metadata["adjective"]
+    assert example.text[verb_start:verb_end] == example.metadata["verb"]
+    assert example.text[summary_start:summary_end] == "movie"
+    assert example.text[:summary_start].count("movie") == 1
+    assert example.text.endswith("is")
 
 
 def test_hf_directed_pair_loader_accepts_source_target_schema(monkeypatch, tmp_path):
@@ -238,17 +255,31 @@ def test_best_layers_are_independent_by_position_dataset_and_metric():
         assert flip.layer == 1
 
 
-def test_activation_position_api_supports_focus_and_final():
+def test_activation_position_api_supports_named_toy_positions_and_final():
     batch = TokenizedBatch(
         input_ids=torch.tensor([[1, 2, 3], [4, 5, 0]]),
         attention_mask=torch.tensor([[1, 1, 1], [1, 1, 0]]),
         focus_positions=torch.tensor([1, 0]),
+        named_positions={
+            "adjective": torch.tensor([1, 0]),
+            "verb": torch.tensor([2, 1]),
+            "summary": torch.tensor([0, 1]),
+        },
     )
     torch.testing.assert_close(
         CausalLMAdapter.activation_positions(batch, "focus"), torch.tensor([1, 0])
     )
     torch.testing.assert_close(
         CausalLMAdapter.activation_positions(batch, "final"), torch.tensor([2, 1])
+    )
+    torch.testing.assert_close(
+        CausalLMAdapter.activation_positions(batch, "adjective"), torch.tensor([1, 0])
+    )
+    torch.testing.assert_close(
+        CausalLMAdapter.activation_positions(batch, "verb"), torch.tensor([2, 1])
+    )
+    torch.testing.assert_close(
+        CausalLMAdapter.activation_positions(batch, "summary"), torch.tensor([0, 1])
     )
 
 
@@ -258,22 +289,20 @@ def test_direction_artifact_audit_checks_every_configured_combination(tmp_path):
     direction_dir = tmp_path / "directions"
     model_dir.mkdir(parents=True)
     direction_dir.mkdir()
-    (results_dir / "run_manifest.json").write_text(
-        json.dumps({"models": ["gpt2-small"]})
-    )
+    (results_dir / "run_manifest.json").write_text(json.dumps({"models": ["gpt2-small"]}))
     (model_dir / "resolved_config.json").write_text(
         json.dumps(
             {
                 "sweep": {
                     "methods": ["mean_diff", "das"],
-                    "fit_positions": ["adjective", "final"],
+                    "fit_positions": ["adjective", "verb", "summary", "final"],
                 },
                 "resolved_layers": [1, 2],
             }
         )
     )
     rows = []
-    for position in ("adjective", "final"):
+    for position in ("adjective", "verb", "summary", "final"):
         for method in ("mean_diff", "das"):
             for layer in (1, 2):
                 path = direction_dir / f"{position}-{method}-layer{layer:02d}.npz"
@@ -292,12 +321,12 @@ def test_direction_artifact_audit_checks_every_configured_combination(tmp_path):
 
     audit.require_complete()
     assert audit.complete
-    assert audit.expected_total == 8
+    assert audit.expected_total == 16
     assert audit.summary.iloc[0].to_dict() == {
         "model": "gpt2-small",
-        "expected_artifacts": 8,
-        "recorded_artifacts": 8,
-        "existing_artifacts": 8,
+        "expected_artifacts": 16,
+        "recorded_artifacts": 16,
+        "existing_artifacts": 16,
         "missing_combinations": 0,
         "unexpected_combinations": 0,
         "duplicate_records": 0,

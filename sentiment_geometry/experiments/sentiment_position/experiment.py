@@ -173,7 +173,7 @@ class SentimentPositionExperiment:
                 adapter,
                 data.train_examples,
                 layer,
-                position="focus" if position == "adjective" else "final",
+                position=position,
                 batch_size=model.batch_size,
             )
             for position in self.config.sweep.fit_positions

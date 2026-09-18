@@ -240,7 +240,7 @@ def main(argv: list[str] | None = None) -> None:
     position_comparison = subparsers.add_parser(
         "compare-sentiment-positions",
         help=(
-            "fit ToyMovieReview directions at adjective/final positions and evaluate "
+            "fit ToyMovieReview directions at adjective/verb/summary/final positions and evaluate "
             "mandatory adjective, verb, adverb, and SST directed-pair panels"
         ),
     )
@@ -273,7 +273,7 @@ def main(argv: list[str] | None = None) -> None:
         "--fit-position",
         action="append",
         choices=SUPPORTED_FITTING_POSITIONS,
-        help="activation position; repeat for both (config runs both by default)",
+        help="activation position; repeat as needed (config runs all four by default)",
     )
     layer_group = position_comparison.add_mutually_exclusive_group()
     layer_group.add_argument(

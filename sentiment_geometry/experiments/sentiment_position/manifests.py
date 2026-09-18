@@ -49,6 +49,10 @@ def prompt_rows(
         focus_position = None if batch.focus_positions is None else int(batch.focus_positions[0])
         if focus_position is not None and focus_position < 0:
             focus_position = None
+        named_positions = {
+            name: int(positions[0]) if int(positions[0]) >= 0 else None
+            for name, positions in (batch.named_positions or {}).items()
+        }
         rows.append(
             {
                 "dataset": dataset,
@@ -60,6 +64,10 @@ def prompt_rows(
                 "token_ids": json.dumps(token_ids),
                 "num_tokens": len(token_ids),
                 "focus_position": focus_position,
+                "adjective_position": named_positions.get("adjective"),
+                "verb_position": named_positions.get("verb"),
+                "summary_position": named_positions.get("summary"),
+                "final_position": int(adapter.last_positions(batch.attention_mask)[0]),
                 "focus_word": example.metadata.get("focus_word")
                 or example.metadata.get("adjective"),
                 "focus_word_type": example.metadata.get("focus_word_type", "adjective"),

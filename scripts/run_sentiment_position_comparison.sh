@@ -9,6 +9,8 @@ sentiment-geometry compare-sentiment-positions \
   --method logistic_regression \
   --method das \
   --fit-position adjective \
+  --fit-position verb \
+  --fit-position summary \
   --fit-position final \
   --all-non-embedding-layers \
   --device auto \

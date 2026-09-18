@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from dataclasses import dataclass
 from itertools import cycle
@@ -106,6 +107,25 @@ def _leading_space_token_length(tokenizer, word: str) -> int:
     return len(tokenizer(" " + word.strip(), add_special_tokens=False)["input_ids"])
 
 
+def _toy_prompt_spans(text: str, *, adjective: str, verb: str) -> dict[str, tuple[int, int]]:
+    """Locate the ADJ, VRB, and second-movie (SUM) spans in a Toy prompt."""
+
+    adjective_start = text.index(adjective)
+    verb_start = text.index(verb, adjective_start + len(adjective))
+    movie_starts = [match.start() for match in re.finditer(r"\bmovie\b", text)]
+    if len(movie_starts) != 2:
+        raise ValueError(
+            "ToyMovieReview prompts must contain exactly two standalone 'movie' spans; "
+            f"found {len(movie_starts)} in {text!r}"
+        )
+    summary_start = movie_starts[1]
+    return {
+        "adjective": (adjective_start, adjective_start + len(adjective)),
+        "verb": (verb_start, verb_start + len(verb)),
+        "summary": (summary_start, summary_start + len("movie")),
+    }
+
+
 def _pair_equal_length_examples(
     examples: list[TextExample], tokenizer, *, prepend_bos: bool
 ) -> list[CounterfactualPair]:
@@ -149,6 +169,15 @@ def _make_word_examples(
             values = {**fixed_values, placeholder: word}
             text = template.format(**values)
             focus_start = text.index(word)
+            named_spans = (
+                _toy_prompt_spans(
+                    text,
+                    adjective=values["adjective"],
+                    verb=values["verb"],
+                )
+                if {"adjective", "verb"} <= values.keys()
+                else {}
+            )
             examples.append(
                 TextExample(
                     text=text,
@@ -156,6 +185,7 @@ def _make_word_examples(
                     example_id=f"{dataset_name}-{'pos' if label else 'neg'}-{index:03d}",
                     focus_start=focus_start,
                     focus_end=focus_start + len(word),
+                    named_spans=named_spans,
                     metadata={
                         "evaluation_dataset": dataset_name,
                         "focus_word": word,
@@ -250,14 +280,16 @@ def _make_examples(
     examples: list[TextExample] = []
     for index, (adjective, verb) in enumerate(zip(adjectives, cycle(verbs))):
         text = template.format(adjective=adjective, verb=verb)
-        focus_start = text.index(adjective)
+        named_spans = _toy_prompt_spans(text, adjective=adjective, verb=verb)
+        focus_start, focus_end = named_spans["adjective"]
         examples.append(
             TextExample(
                 text=text,
                 label=label,
                 example_id=f"toy-{split}-{'pos' if label else 'neg'}-{index:03d}",
                 focus_start=focus_start,
-                focus_end=focus_start + len(adjective),
+                focus_end=focus_end,
+                named_spans=named_spans,
                 metadata={"adjective": adjective, "verb": verb, "split": split},
             )
         )

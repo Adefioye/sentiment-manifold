@@ -11,7 +11,7 @@ import seaborn as sns
 from matplotlib.figure import Figure
 
 MODEL_ORDER = ("gpt2-small", "qwen-0.6b")
-POSITION_ORDER = ("adjective", "final")
+POSITION_ORDER = ("adjective", "verb", "summary", "final")
 METHOD_ORDER = ("mean_diff", "logistic_regression", "das")
 DATASET_ORDER = ("toy_adjectives", "toy_verbs", "toy_adverbs", "sst")
 
@@ -21,6 +21,8 @@ MODEL_LABELS = {
 }
 POSITION_LABELS = {
     "adjective": "Adjective position",
+    "verb": "Verb position (VRB)",
+    "summary": 'Second "movie" position (SUM)',
     "final": "Final prompt-token position",
 }
 METHOD_LABELS = {
@@ -180,7 +182,9 @@ def figure4_style_table(
         for dataset in datasets:
             for metric in METRIC_LABELS:
                 result = indexed.loc[(method, dataset, metric)]
-                cells.append(f"{float(result['value_percent']):.1f}%\n(L{int(result['layer']):02d})")
+                cells.append(
+                    f"{float(result['value_percent']):.1f}%\n(L{int(result['layer']):02d})"
+                )
         rows.append(cells)
     return pd.DataFrame(
         rows,
@@ -323,16 +327,14 @@ def plot_logit_difference_grid(
     figure, axes = plt.subplots(
         len(models),
         len(positions),
-        figsize=(13, 8.5),
+        figsize=(6.5 * len(positions), 8.5),
         sharey=True,
         squeeze=False,
     )
     for row, model in enumerate(models):
         for column, position in enumerate(positions):
             axis = axes[row, column]
-            panel = subset[
-                (subset["model"] == model) & (subset["fit_position"] == position)
-            ].copy()
+            panel = subset[(subset["model"] == model) & (subset["fit_position"] == position)].copy()
             expected_methods = set(methods)
             if set(panel["method"]) != expected_methods:
                 raise ValueError(f"Incomplete methods for {dataset}/{model}/{position}")

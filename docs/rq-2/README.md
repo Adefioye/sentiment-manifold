@@ -7,7 +7,7 @@ causally useful are those directions on SST, IMDb, DynaSent, and CEBaB across mo
 
 Use Difference-in-means, logistic regression and DAS fitting methods for learning `sentiment direction` and `valence direction`.
 
-- [x] **1.** For a start, I want to fit the three methods on ToyMovieReview datasets to learn sentiment sentiment direction using `gpt2-small and qwen-0.6b`, check first, middle and last layer similarity of sentiment directions and then test out logit difference and logit flip percent by patching all token positions. However, the activations used for the fitting methods would be extracted from [last token position] and [adjective] position in the prompt. Ideally, I want to know which of the activations provide better on in-distribution and out-distribution ToyMovieReview and SST datasets respectively.
+- [x] **1.** For a start, fit the three methods on ToyMovieReview to learn sentiment directions using `gpt2-small` and `qwen-0.6b`; compare direction similarity at the first, middle, and last layers; and measure logit-difference recovery and logit-flip percent by patching all token positions. Fit separate directions from activations at the adjective (ADJ), verb (VRB), second `movie` (SUM), and final `is` (END) positions, then compare their in-distribution ToyMovieReview and out-of-distribution SST performance.
 
 - [ ] **2.** Secondly, we would then train the 3 methods to learn sentiment and valence direction using ToyMovieReview and AIT respectively for all 4 models. Here, we use about same amount of datasets for training both directions. What this means is, roughly about 55 data samples for both ToyMovieReview and AIT. We observe the effect on logit difference and logit flip percent. The method of extracting activations for learning sentiment direction depends on which performs best from 1 above. For valence direction, activation extraction should involve all activations of all tokens per data sample and then averaging them to train the fitting methods.
 
@@ -94,7 +94,10 @@ chosen pair policy before confirmation runs.
 
 Question 1 uses the domain-named sentiment-position comparison API so it does not alter the RQ1
 reproduction protocol. It fits mean difference, logistic regression, and one-dimensional DAS
-independently at the adjective and final prompt-token positions. It sweeps residual boundaries
+independently at four prompt-token positions: the adjective (ADJ), verb (VRB), second `movie`
+(SUM), and final `is` token (END). ADJ, VRB, and SUM are resolved from character spans through
+each model's tokenizer rather than assumed token indices; END is the last non-padding token. It
+sweeps residual boundaries
 `1..n_layers`; boundary `0` is the embedding residual and is excluded. All-token directional
 patching is then run on four required evaluation panels:
 
@@ -111,8 +114,8 @@ The complete configuration is in
 The step-by-step
 [`Colab sentiment-position notebook`](../../notebooks/03_colab_sentiment_position_comparison.ipynb)
 runs both pinned models and writes every direction, result table, manifest, and figure directly to
-a collision-safe, minute-stamped Google Drive directory. Its artifact audit expects 72 GPT-2 Small
-directions and 168 Qwen3-0.6B directions.
+a collision-safe, minute-stamped Google Drive directory. Its artifact audit expects 144 GPT-2 Small
+directions and 336 Qwen3-0.6B directions.
 The read-only
 [`sentiment-position exploration notebook`](../../notebooks/04_colab_explore_sentiment_position_results.ipynb)
 displays Figure 4-style best-layer tables, cosine similarities, and model-by-position layer curves
@@ -137,7 +140,7 @@ Run the explicit, full experiment command with:
 ./scripts/run_sentiment_position_comparison.sh
 ```
 
-The script passes both models, all three methods, both fitting positions, the complete non-embedding
+The script passes both models, all three methods, all four fitting positions, the complete non-embedding
 layer sweep, fitting hyperparameters, SST repository, authentication environment variable, output
 directory, and checkpoint directory explicitly. `HF_TOKEN` or `HF_TOKEN_PATH` must provide access
 to the private SST repository. Checkpoints are resumable.
@@ -148,7 +151,9 @@ Each model directory saves `resolved_config.json`, `dataset_summary.csv`, `promp
 `best_layers.csv`. The best logit-difference and logit-flip boundaries are selected independently
 for every model × method × fitting-position × evaluation-dataset cell. Absolute cosine is the
 primary similarity at boundaries `[1, floor(n_layers/2), n_layers]`; signed cosine is retained for
-audit.
+audit. For Toy prompts, `prompt_manifest.csv` records `adjective_position`, `verb_position`,
+`summary_position`, and `final_position`, making the tokenizer-resolved ADJ/VRB/SUM/END indices
+directly inspectable.
 
 Plots are recreated only from saved tables:
 

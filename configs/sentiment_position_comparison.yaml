@@ -29,7 +29,7 @@ sweep:
   # Boundary 0 is the embedding residual and is deliberately excluded.
   layers: all_non_embedding
   methods: [mean_diff, logistic_regression, das]
-  fit_positions: [adjective, final]
+  fit_positions: [adjective, verb, summary, final]
   output_dir: outputs/sentiment-position-comparison
   checkpoint_dir: checkpoints/sentiment-position-comparison
   resume: true

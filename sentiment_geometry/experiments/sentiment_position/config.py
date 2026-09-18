@@ -12,7 +12,7 @@ from ...fitting_methods.config import DASConfig, FittingConfig
 from ...models.config import ModelConfig
 
 SUPPORTED_FITTING_METHODS = ("mean_diff", "logistic_regression", "das")
-SUPPORTED_FITTING_POSITIONS = ("adjective", "final")
+SUPPORTED_FITTING_POSITIONS = ("adjective", "verb", "summary", "final")
 REQUIRED_TOY_EVALUATIONS = ("toy_adjectives", "toy_verbs", "toy_adverbs")
 
 

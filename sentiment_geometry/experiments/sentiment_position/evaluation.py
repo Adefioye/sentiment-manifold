@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -41,6 +41,9 @@ class DirectionEvaluator:
         fit_position: str,
         method: str,
         layer: int,
+        evaluation_names: Sequence[str] | None = None,
+        phase: str = "evaluation",
+        selected_layer: bool = False,
     ) -> DirectionEvaluationResult:
         metric_rows: list[dict[str, Any]] = []
         patching_rows: list[dict[str, Any]] = []
@@ -49,8 +52,14 @@ class DirectionEvaluator:
             "method": method,
             "fit_position": fit_position,
             "layer": layer,
+            "phase": phase,
+            "selected_layer": selected_layer,
         }
-        for evaluation in self.evaluations.values():
+        names = tuple(evaluation_names) if evaluation_names is not None else tuple(self.evaluations)
+        for name in names:
+            if name not in self.evaluations:
+                raise ValueError(f"Unknown evaluation dataset: {name}")
+            evaluation = self.evaluations[name]
             result = evaluate_directional_patching(
                 self.adapter,
                 list(evaluation.pairs),

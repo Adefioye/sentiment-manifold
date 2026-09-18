@@ -22,7 +22,11 @@ from .datasets import PreparedSentimentData, SentimentDatasetLoader
 from .evaluation import DirectionEvaluator
 from .fitting import DirectionFitRequest, DirectionFitService, FittedDirection
 from .manifests import answer_token_rows, pair_rows, prompt_rows, vocabulary_rows
-from .results import ExperimentTables, direction_similarity_rows, select_best_layers
+from .results import (
+    ExperimentTables,
+    direction_similarity_rows,
+    select_layers_by_validation_metric,
+)
 
 AdapterFactory = Callable[..., CausalLMAdapter]
 
@@ -59,6 +63,7 @@ class SentimentPositionExperiment:
                 "methods": list(self.config.sweep.methods),
                 "fit_positions": list(self.config.sweep.fit_positions),
                 "toy_evaluations": list(self.config.data.toy_evaluations),
+                "selection": asdict(self.config.selection),
                 "sst_repo_id": self.config.data.sst_repo_id,
                 "sst_revision": self.config.data.sst_revision,
             },
@@ -113,10 +118,11 @@ class SentimentPositionExperiment:
             evaluations=data.evaluations,
         )
         tables = ExperimentTables()
+        fitted_directions: dict[tuple[int, str, str], FittedDirection] = {}
         labels = np.asarray([row.label for row in data.train_examples])
         for layer in tqdm(layers, desc=f"{model.name} sentiment-position boundaries"):
             activations = self._extract_training_activations(adapter, model, data, layer)
-            directions = self._run_layer(
+            directions, fitted_at_layer = self._run_layer(
                 adapter=adapter,
                 model=model,
                 data=data,
@@ -127,6 +133,12 @@ class SentimentPositionExperiment:
                 layer=layer,
                 tables=tables,
             )
+            fitted_directions.update(
+                {
+                    (layer, fit_position, method): fitted
+                    for (fit_position, method), fitted in fitted_at_layer.items()
+                }
+            )
             if layer in snapshots:
                 tables.direction_similarities.extend(
                     direction_similarity_rows(
@@ -136,7 +148,19 @@ class SentimentPositionExperiment:
                     )
                 )
             self._flush_tables(store, tables)
-        self._finalize_tables(store, tables)
+        selection = select_layers_by_validation_metric(
+            pd.DataFrame(tables.metrics),
+            dataset=self.config.selection.layer_dataset,
+            metric=self.config.selection.layer_metric,
+        )
+        self._record_layer_selection(selection, tables, fitted_directions)
+        self._evaluate_selected_directions(
+            evaluator=evaluator,
+            selection=selection,
+            fitted_directions=fitted_directions,
+            tables=tables,
+        )
+        self._finalize_tables(store, tables, selection)
         del adapter
         clear_device_cache(device_spec.device)
         return store.run_dir
@@ -146,16 +170,27 @@ class SentimentPositionExperiment:
         store.write_rows("metrics.csv", tables.metrics)
         store.write_rows("patching_records.csv", tables.patching_records)
         store.write_rows("direction_metadata.csv", tables.direction_metadata)
-        if tables.das_losses:
-            store.write_rows("das_losses.csv", tables.das_losses)
+        if tables.das_epoch_metrics:
+            store.write_rows("das_epoch_metrics.csv", tables.das_epoch_metrics)
         if tables.direction_similarities:
             store.write_rows("direction_similarities.csv", tables.direction_similarities)
 
-    @classmethod
-    def _finalize_tables(cls, store: RunArtifactStore, tables: ExperimentTables) -> None:
-        cls._flush_tables(store, tables)
-        best = select_best_layers(pd.DataFrame(tables.metrics))
-        store.write_rows("best_layers.csv", best.to_dict(orient="records"))
+    def _finalize_tables(
+        self,
+        store: RunArtifactStore,
+        tables: ExperimentTables,
+        selection: pd.DataFrame,
+    ) -> None:
+        self._flush_tables(store, tables)
+        store.write_rows("layer_selection.csv", selection.to_dict(orient="records"))
+        selected_metrics = [
+            row
+            for row in tables.metrics
+            if row.get("selected_layer")
+            and row.get("phase") != "layer_selection"
+            and row.get("dataset") in self.config.selection.final_evaluations
+        ]
+        store.write_rows("selected_metrics.csv", selected_metrics)
 
     def _extract_training_activations(
         self,
@@ -187,8 +222,10 @@ class SentimentPositionExperiment:
         activations: Mapping[str, np.ndarray],
         layer: int,
         tables: ExperimentTables,
-    ) -> dict[tuple[str, str], np.ndarray]:
+    ) -> tuple[dict[tuple[str, str], np.ndarray], dict[tuple[str, str], FittedDirection]]:
         directions: dict[tuple[str, str], np.ndarray] = {}
+        fitted_at_layer: dict[tuple[str, str], FittedDirection] = {}
+        validation = data.evaluations[self.config.selection.das_checkpoint_dataset]
         for fit_position in self.config.sweep.fit_positions:
             for method in self.config.sweep.methods:
                 fitted = fit_service.fit(
@@ -201,20 +238,92 @@ class SentimentPositionExperiment:
                         fit_position=fit_position,
                         layer=layer,
                         answers=data.filtered_toy.answers,
+                        validation_dataset=validation.name,
+                        validation_pairs=validation.pairs,
+                        validation_answers=validation.answers,
                     )
                 )
                 directions[(fit_position, method)] = fitted.artifact.vector
+                fitted_at_layer[(fit_position, method)] = fitted
                 self._record_direction(tables, model, fitted, fit_position, method, layer)
                 evaluation = evaluator.evaluate(
                     fitted=fitted,
                     fit_position=fit_position,
                     method=method,
                     layer=layer,
+                    evaluation_names=(self.config.selection.layer_dataset,),
+                    phase="layer_selection",
                 )
                 tables.metrics.extend(evaluation.metrics)
                 tables.patching_records.extend(evaluation.patching_records)
                 clear_device_cache(adapter.device_spec.device)
-        return directions
+        return directions, fitted_at_layer
+
+    def _record_layer_selection(
+        self,
+        selection: pd.DataFrame,
+        tables: ExperimentTables,
+        fitted_directions: Mapping[tuple[int, str, str], FittedDirection],
+    ) -> None:
+        for index, selected in selection.iterrows():
+            layer = int(selected["selected_layer"])
+            fit_position = str(selected["fit_position"])
+            method = str(selected["method"])
+            fitted = fitted_directions[(layer, fit_position, method)]
+            selection.loc[index, "selected_epoch"] = fitted.artifact.metadata.get(
+                "selected_epoch"
+            )
+            selection.loc[index, "direction_checkpoint"] = str(fitted.checkpoint_path)
+            for row in tables.metrics:
+                if (
+                    row["method"] == method
+                    and row["fit_position"] == fit_position
+                    and row["layer"] == layer
+                    and row["dataset"] == self.config.selection.layer_dataset
+                ):
+                    row["selected_layer"] = True
+            for row in tables.patching_records:
+                if (
+                    row["method"] == method
+                    and row["fit_position"] == fit_position
+                    and row["layer"] == layer
+                    and row["dataset"] == self.config.selection.layer_dataset
+                ):
+                    row["selected_layer"] = True
+            for row in tables.direction_metadata:
+                if (
+                    row["method"] == method
+                    and row["fit_position"] == fit_position
+                    and row["layer"] == layer
+                ):
+                    row["selected_layer"] = True
+
+    def _evaluate_selected_directions(
+        self,
+        *,
+        evaluator: DirectionEvaluator,
+        selection: pd.DataFrame,
+        fitted_directions: Mapping[tuple[int, str, str], FittedDirection],
+        tables: ExperimentTables,
+    ) -> None:
+        for selected in selection.itertuples(index=False):
+            layer = int(selected.selected_layer)
+            fit_position = str(selected.fit_position)
+            method = str(selected.method)
+            fitted = fitted_directions[(layer, fit_position, method)]
+            for dataset in self.config.selection.final_evaluations:
+                phase = "final_evaluation" if dataset == "sst" else "selected_layer_evaluation"
+                evaluation = evaluator.evaluate(
+                    fitted=fitted,
+                    fit_position=fit_position,
+                    method=method,
+                    layer=layer,
+                    evaluation_names=(dataset,),
+                    phase=phase,
+                    selected_layer=True,
+                )
+                tables.metrics.extend(evaluation.metrics)
+                tables.patching_records.extend(evaluation.patching_records)
 
     def _record_direction(
         self,
@@ -238,19 +347,26 @@ class SentimentPositionExperiment:
                 "orientation_sign_flipped": artifact.metadata.get("orientation_sign_flipped"),
                 "raw_orientation_dot": artifact.metadata.get("raw_orientation_dot"),
                 "train_accuracy": artifact.metadata.get("train_accuracy"),
+                "selected_epoch": artifact.metadata.get("selected_epoch"),
+                "checkpoint_selection_metric": artifact.metadata.get(
+                    "checkpoint_selection_metric"
+                ),
+                "best_checkpoint_metric": artifact.metadata.get("best_checkpoint_metric"),
+                "selected_layer": False,
                 "artifact_path": str(fitted.checkpoint_path),
                 "artifact_relative_path": str(
                     fitted.checkpoint_path.relative_to(self.config.sweep.checkpoint_dir)
                 ),
             }
         )
-        tables.das_losses.extend(
+        tables.das_epoch_metrics.extend(
             {
                 "model": model.name,
                 "method": method,
                 "fit_position": fit_position,
                 "layer": layer,
                 "seed": self.config.seed,
+                "validation_dataset": self.config.selection.das_checkpoint_dataset,
                 **loss,
             }
             for loss in artifact.metadata.get("loss_history", [])
@@ -298,8 +414,8 @@ class SentimentPositionExperiment:
             self._dataset_summary_rows(model, data),
         )
 
-    @staticmethod
     def _dataset_summary_rows(
+        self,
         model: ModelConfig,
         data: PreparedSentimentData,
     ) -> list[dict[str, Any]]:
@@ -315,13 +431,23 @@ class SentimentPositionExperiment:
                 {
                     "model": model.name,
                     "dataset": evaluation.name,
-                    "role": "causal_evaluation",
+                    "role": self._dataset_role(evaluation.name),
                     "n_examples": len(evaluation.examples),
                     "n_directed_cases": len(evaluation.pairs),
                 }
                 for evaluation in data.evaluations.values()
             ],
         ]
+
+    def _dataset_role(self, dataset: str) -> str:
+        roles: list[str] = []
+        if dataset == self.config.selection.das_checkpoint_dataset:
+            roles.append("checkpoint_validation")
+        if dataset == self.config.selection.layer_dataset:
+            roles.append("layer_selection")
+        if dataset in self.config.selection.final_evaluations:
+            roles.append("final_ood_evaluation" if dataset == "sst" else "selected_layer_evaluation")
+        return "+".join(roles) or "configured_evaluation"
 
     def _resolved_config(
         self,

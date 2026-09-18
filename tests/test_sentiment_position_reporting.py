@@ -9,10 +9,10 @@ from sentiment_geometry.reporting import (
     DATASET_ORDER,
     MODEL_ORDER,
     SentimentPositionReportData,
-    figure4_style_table,
     plot_cosine_similarity_grid,
     plot_cross_position_cosines,
     plot_logit_difference_grid,
+    selected_layer_table,
 )
 
 POSITIONS = ("adjective", "verb", "summary", "final")
@@ -22,7 +22,7 @@ LAYERS = (1, 2, 3)
 
 def _tables() -> dict[str, pd.DataFrame]:
     metrics = []
-    best = []
+    layer_selection = []
     similarities = []
     summary = []
     for model_offset, model in enumerate(MODEL_ORDER):
@@ -47,7 +47,8 @@ def _tables() -> dict[str, pd.DataFrame]:
             )
             for position_offset, position in enumerate(POSITIONS):
                 for method_offset, method in enumerate(METHODS):
-                    for layer in LAYERS:
+                    evaluated_layers = LAYERS if dataset == "toy_adverbs" else (1,)
+                    for layer in evaluated_layers:
                         metrics.append(
                             {
                                 "model": model,
@@ -55,6 +56,12 @@ def _tables() -> dict[str, pd.DataFrame]:
                                 "fit_position": position,
                                 "layer": layer,
                                 "dataset": dataset,
+                                "phase": (
+                                    "layer_selection"
+                                    if dataset == "toy_adverbs"
+                                    else "final_evaluation"
+                                ),
+                                "selected_layer": layer == 1,
                                 "logit_difference_percent": (
                                     10 * layer
                                     + model_offset
@@ -65,36 +72,22 @@ def _tables() -> dict[str, pd.DataFrame]:
                                 "logit_flip_percent": (
                                     40 - 5 * layer + dataset_offset + method_offset
                                 ),
+                                "sign_flip_percent": 30 + dataset_offset + method_offset,
                             }
                         )
-                    best.extend(
-                        [
+                    if dataset == "toy_adverbs":
+                        layer_selection.append(
                             {
                                 "model": model,
                                 "method": method,
                                 "fit_position": position,
-                                "dataset": dataset,
-                                "metric": "logit_difference",
-                                "layer": 3,
-                                "value_percent": (
-                                    30
-                                    + model_offset
-                                    + dataset_offset
-                                    + position_offset
-                                    + method_offset
-                                ),
-                            },
-                            {
-                                "model": model,
-                                "method": method,
-                                "fit_position": position,
-                                "dataset": dataset,
-                                "metric": "logit_flip",
-                                "layer": 1,
-                                "value_percent": 35 + dataset_offset + method_offset,
-                            },
-                        ]
-                    )
+                                "selection_dataset": "toy_adverbs",
+                                "selection_metric": "logit_flip_percent",
+                                "selected_layer": 1,
+                                "selection_value_percent": 35 + method_offset,
+                                "tie_break_rule": "lowest_layer",
+                            }
+                        )
         for layer in LAYERS:
             for position_a in POSITIONS:
                 for method_a_offset, method_a in enumerate(METHODS):
@@ -115,9 +108,11 @@ def _tables() -> dict[str, pd.DataFrame]:
                                     "absolute_cosine": abs(signed),
                                 }
                             )
+    metric_table = pd.DataFrame(metrics)
     return {
-        "metrics.csv": pd.DataFrame(metrics),
-        "best_layers.csv": pd.DataFrame(best),
+        "metrics.csv": metric_table,
+        "layer_selection.csv": pd.DataFrame(layer_selection),
+        "selected_metrics.csv": metric_table[metric_table["selected_layer"]].copy(),
         "direction_similarities.csv": pd.DataFrame(similarities),
         "dataset_summary.csv": pd.DataFrame(summary),
     }
@@ -144,19 +139,19 @@ def test_report_loader_reads_complete_evaluation_results_without_training_metric
     assert set(tmp_path.rglob("*")) == files_before
 
 
-def test_figure4_style_table_has_methods_and_evaluation_metric_columns(tmp_path):
+def test_selected_layer_table_has_methods_and_fixed_layer_metric_columns(tmp_path):
     _write_results(tmp_path)
     report = SentimentPositionReportData.load(tmp_path)
 
-    table = figure4_style_table(
-        report.best_layers,
+    table = selected_layer_table(
+        report.selected_metrics,
         model="gpt2-small",
         fit_position="adjective",
     )
 
-    assert table.shape == (3, 8)
-    assert table.loc["Mean difference", "Toy adjectives\nLogit difference"] == "30.0%\n(L03)"
-    assert table.loc["DAS", "SST\nLogit flip"] == "40.0%\n(L01)"
+    assert table.shape == (3, 9)
+    assert table.loc["Mean difference", "Toy adjectives\nLogit difference"] == "11.0%\n(L01)"
+    assert table.loc["DAS", "SST\nLogit flip"] == "39.0%\n(L01)"
 
 
 def test_read_only_plotters_return_expected_figure_layouts(tmp_path):

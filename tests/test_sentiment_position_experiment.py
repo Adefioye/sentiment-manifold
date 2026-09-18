@@ -21,8 +21,12 @@ from sentiment_geometry.experiments.sentiment_position.config import (
     apply_config_overrides,
     comparison_boundaries,
 )
-from sentiment_geometry.experiments.sentiment_position.results import select_best_layers
+from sentiment_geometry.experiments.sentiment_position.results import (
+    ExperimentTables,
+    select_layers_by_validation_metric,
+)
 from sentiment_geometry.models.huggingface import CausalLMAdapter, TokenizedBatch
+from sentiment_geometry.persistence import RunArtifactStore
 
 PROJECT_ROOT = Path(__file__).parents[1]
 
@@ -91,10 +95,61 @@ def test_config_runs_all_positions_methods_and_non_embedding_layers():
     assert config.sweep.methods == ["mean_diff", "logistic_regression", "das"]
     assert config.sweep.fit_positions == ["adjective", "verb", "summary", "final"]
     assert config.data.toy_evaluations == ["toy_adjectives", "toy_adverbs"]
+    assert config.selection.das_checkpoint_dataset == "toy_adverbs"
+    assert config.selection.layer_dataset == "toy_adverbs"
+    assert config.selection.layer_metric == "logit_flip_percent"
+    assert config.selection.final_evaluations == ["toy_adverbs", "toy_adjectives", "sst"]
     assert config.layers_for(4) == [1, 2, 3, 4]
     with pytest.raises(ValueError, match="boundary 0 is excluded"):
         config.sweep.layers = [0, 1]
         config.layers_for(4)
+
+
+def test_checkpoint_and_layer_selection_reuse_the_same_dataset():
+    config = SentimentPositionExperimentConfig.load(
+        PROJECT_ROOT / "configs/sentiment_position_comparison.yaml"
+    )
+    config.selection.layer_dataset = "toy_adjectives"
+    with pytest.raises(ValueError, match="must reuse the same evaluation dataset"):
+        config.validate()
+
+
+def test_layer_selection_dataset_must_be_rerun_in_final_evaluations():
+    config = SentimentPositionExperimentConfig.load(
+        PROJECT_ROOT / "configs/sentiment_position_comparison.yaml"
+    )
+    config.selection.final_evaluations = ["toy_adjectives", "sst"]
+    with pytest.raises(ValueError, match="must also be included in final evaluations"):
+        config.validate()
+
+
+def test_selected_metrics_contains_only_post_selection_evaluations(tmp_path):
+    config = SentimentPositionExperimentConfig.load(
+        PROJECT_ROOT / "configs/sentiment_position_comparison.yaml"
+    )
+    experiment = SentimentPositionExperiment(config)
+    common = {
+        "model": "gpt2-small",
+        "method": "mean_diff",
+        "fit_position": "adjective",
+        "layer": 2,
+        "selected_layer": True,
+    }
+    tables = ExperimentTables(
+        metrics=[
+            {**common, "dataset": "toy_adverbs", "phase": "layer_selection"},
+            {**common, "dataset": "toy_adverbs", "phase": "selected_layer_evaluation"},
+            {**common, "dataset": "toy_adjectives", "phase": "selected_layer_evaluation"},
+            {**common, "dataset": "sst", "phase": "final_evaluation"},
+        ]
+    )
+    experiment._finalize_tables(
+        RunArtifactStore(tmp_path), tables, pd.DataFrame([{"selected_layer": 2}])
+    )
+
+    selected = pd.read_csv(tmp_path / "selected_metrics.csv")
+    assert selected["dataset"].tolist() == ["toy_adverbs", "toy_adjectives", "sst"]
+    assert "layer_selection" not in set(selected["phase"])
 
 
 def test_explicit_full_run_flags_preserve_the_complete_grid():
@@ -229,7 +284,7 @@ def test_comparison_boundaries_are_first_floor_middle_last():
     assert comparison_boundaries(3) == (1, 3)
 
 
-def test_best_layers_are_independent_by_position_dataset_and_metric():
+def test_layers_are_selected_only_by_adverb_logit_flip():
     rows = []
     for fit_position in ("adjective", "final"):
         for layer, recovery, flip in (
@@ -242,18 +297,18 @@ def test_best_layers_are_independent_by_position_dataset_and_metric():
                     "model": "gpt2-small",
                     "method": "mean_diff",
                     "fit_position": fit_position,
-                    "dataset": "toy_verbs",
+                    "dataset": "toy_adverbs",
+                    "phase": "layer_selection",
                     "layer": layer,
                     "logit_difference_percent": recovery,
                     "logit_flip_percent": flip,
                 }
             )
-    best = select_best_layers(pd.DataFrame(rows))
-    for _, group in best.groupby("fit_position"):
-        recovery = group[group.metric == "logit_difference"].iloc[0]
-        flip = group[group.metric == "logit_flip"].iloc[0]
-        assert recovery.layer == 2
-        assert flip.layer == 1
+    selected = select_layers_by_validation_metric(
+        pd.DataFrame(rows), dataset="toy_adverbs", metric="logit_flip_percent"
+    )
+    assert set(selected["selected_layer"]) == {1}
+    assert set(selected["selection_metric"]) == {"logit_flip_percent"}
 
 
 def test_activation_position_api_supports_named_toy_positions_and_final():

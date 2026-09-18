@@ -10,6 +10,7 @@ from typing import Any
 import numpy as np
 
 from ...datasets.types import CounterfactualPair, TextExample
+from ...evaluation import DirectionalPatchingEvaluator
 from ...fitting_methods import DirectionArtifact, create_fitter
 from ...fitting_methods.base import FitResult
 from ...fitting_methods.das import DASFitter, DASTrainingConfig
@@ -18,7 +19,7 @@ from ...models.config import ModelConfig
 from ...persistence import checkpoint_variant_dir
 from .config import SentimentPositionExperimentConfig
 
-ARTIFACT_SCHEMA_VERSION = 1
+ARTIFACT_SCHEMA_VERSION = 2
 AnswerSpec = dict[int, tuple[str, ...]]
 
 
@@ -32,6 +33,9 @@ class DirectionFitRequest:
     fit_position: str
     layer: int
     answers: AnswerSpec
+    validation_dataset: str
+    validation_pairs: Sequence[CounterfactualPair]
+    validation_answers: AnswerSpec
 
 
 @dataclass(frozen=True)
@@ -55,6 +59,8 @@ class DirectionFitService:
         self.adapter = adapter
         self.model = model
         self.runtime = runtime
+        self._validation_cache_key: tuple[int, str, tuple[tuple[str, str], ...]] | None = None
+        self._validation_evaluator: DirectionalPatchingEvaluator | None = None
 
     def fit(self, request: DirectionFitRequest) -> FittedDirection:
         hyperparameters = self._hyperparameters(request.method)
@@ -84,6 +90,8 @@ class DirectionFitService:
                 "max_grad_norm": self.config.das.max_grad_norm,
                 "seed": self.config.seed,
                 "implementation": self.config.das.implementation,
+                "checkpoint_dataset": self.config.selection.das_checkpoint_dataset,
+                "checkpoint_metric": self.config.selection.das_checkpoint_metric,
             }
         return {}
 
@@ -103,6 +111,22 @@ class DirectionFitService:
                 {"example_id": row.example_id, "text": row.text, "label": row.label}
                 for row in request.examples
             ],
+            "checkpoint_validation": {
+                "dataset": request.validation_dataset,
+                "pairs": [
+                    {
+                        "clean_id": pair.clean.example_id,
+                        "corrupted_id": pair.corrupted.example_id,
+                    }
+                    for pair in request.validation_pairs
+                ],
+                "answers": {
+                    str(label): list(values)
+                    for label, values in request.validation_answers.items()
+                },
+            }
+            if request.method == "das"
+            else None,
             "hyperparameters": dict(hyperparameters),
         }
         directory = checkpoint_variant_dir(
@@ -174,12 +198,48 @@ class DirectionFitService:
                 seed=self.config.seed,
             )
         )
+
+        validation_key = (
+            request.layer,
+            request.validation_dataset,
+            tuple(
+                (pair.clean.example_id, pair.corrupted.example_id)
+                for pair in request.validation_pairs
+            ),
+        )
+        if self._validation_cache_key != validation_key:
+            self._validation_evaluator = DirectionalPatchingEvaluator(
+                self.adapter,
+                list(request.validation_pairs),
+                layer=request.layer,
+                answers=request.validation_answers,
+                position="all",
+                batch_size=self.model.batch_size,
+            )
+            self._validation_cache_key = validation_key
+        assert self._validation_evaluator is not None
+        validation_evaluator = self._validation_evaluator
+
+        def validate_epoch(direction: np.ndarray) -> dict[str, float]:
+            validation = validation_evaluator.evaluate(direction)
+            return {
+                "validation_loss": 1.0 - validation.recovery,
+                "validation_logit_difference_percent": validation.recovery_percent,
+                "validation_logit_flip_percent": validation.flip_percent,
+                "validation_sign_flip_percent": validation.sign_flip_percent,
+                "validation_corrupted_accuracy": validation.corrupted_accuracy,
+                "validation_clean_accuracy": validation.clean_accuracy,
+                "validation_patched_accuracy": validation.patched_accuracy,
+            }
+
         return fitter.fit(
             self.adapter,
             list(request.pairs),
             layer=request.layer,
             answers=request.answers,
             position=request.fit_position,
+            epoch_validator=validate_epoch,
+            checkpoint_metric="validation_loss",
         )
 
 

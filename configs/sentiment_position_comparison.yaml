@@ -35,6 +35,13 @@ sweep:
   checkpoint_dir: checkpoints/sentiment-position-comparison
   resume: true
 
+selection:
+  das_checkpoint_dataset: toy_adverbs
+  das_checkpoint_metric: logit_difference_loss
+  layer_dataset: toy_adverbs
+  layer_metric: logit_flip_percent
+  final_evaluations: [toy_adverbs, toy_adjectives, sst]
+
 fitting:
   logistic_c: 1.0
   logistic_solver: liblinear

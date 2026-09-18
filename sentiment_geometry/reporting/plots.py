@@ -96,12 +96,17 @@ def plot_run(run_dir: str | Path) -> list[Path]:
     loss_path = run_dir / "das_losses.csv"
     if loss_path.exists():
         losses = pd.read_csv(loss_path)
-        required_loss_columns = {"epoch", "evaluation_loss", "layer", "method"}
+        loss_column = (
+            "post_epoch_train_loss"
+            if "post_epoch_train_loss" in losses
+            else "evaluation_loss"
+        )
+        required_loss_columns = {"epoch", loss_column, "layer", "method"}
         if not losses.empty and required_loss_columns <= set(losses):
             grid = sns.relplot(
                 data=losses,
                 x="epoch",
-                y="evaluation_loss",
+                y=loss_column,
                 hue="method",
                 col="layer",
                 col_wrap=4,
@@ -110,7 +115,7 @@ def plot_run(run_dir: str | Path) -> list[Path]:
                 facet_kws={"sharey": False},
             )
             grid.set_axis_labels("Epoch", "Normalized logit-difference loss")
-            grid.figure.suptitle("DAS training loss by layer", y=1.02)
+            grid.figure.suptitle("DAS post-epoch training loss by layer", y=1.02)
             path = figure_dir / "das_loss_by_epoch.png"
             grid.figure.savefig(path, dpi=180, bbox_inches="tight")
             plt.close(grid.figure)
@@ -149,10 +154,13 @@ def plot_sentiment_position_comparison(
         raise ValueError("Run directory does not contain RQ2 Question 1 metrics")
     outputs: list[Path] = []
     sns.set_theme(style="whitegrid")
+    layer_metrics = metrics
+    if "phase" in metrics:
+        layer_metrics = metrics[metrics["phase"] == "layer_selection"]
 
     for metric in ("logit_difference_percent", "logit_flip_percent"):
         grid = sns.relplot(
-            data=metrics,
+            data=layer_metrics,
             x="layer",
             y=metric,
             hue="method",
@@ -172,29 +180,39 @@ def plot_sentiment_position_comparison(
         plt.close(grid.figure)
         outputs.append(path)
 
-    best_path = run_dir / "best_layers.csv"
-    if best_path.exists():
-        best = pd.read_csv(best_path)
-        for metric, subset in best.groupby("metric", sort=False):
-            plot_data = subset.copy()
-            plot_data["method_position"] = (
-                plot_data["method"].str.replace("_", " ") + " / " + plot_data["fit_position"]
-            )
-            grid = sns.catplot(
-                data=plot_data,
-                x="dataset",
-                y="value_percent",
-                hue="method_position",
-                kind="bar",
-                height=5,
-                aspect=1.8,
-            )
-            grid.set_axis_labels("Evaluation dataset", "Best value across boundaries (%)")
-            grid.figure.suptitle(str(metric).replace("_", " ").title(), y=1.02)
-            path = figure_dir / f"best_{metric}.png"
-            grid.figure.savefig(path, dpi=180, bbox_inches="tight")
-            plt.close(grid.figure)
-            outputs.append(path)
+    selected_path = run_dir / "selected_metrics.csv"
+    if selected_path.exists():
+        selected = pd.read_csv(selected_path)
+        metric_columns = [
+            "logit_difference_percent",
+            "logit_flip_percent",
+            "sign_flip_percent",
+        ]
+        plot_data = selected.melt(
+            id_vars=["dataset", "method", "fit_position"],
+            value_vars=metric_columns,
+            var_name="metric",
+            value_name="value_percent",
+        )
+        plot_data["method_position"] = (
+            plot_data["method"].str.replace("_", " ") + " / " + plot_data["fit_position"]
+        )
+        grid = sns.catplot(
+            data=plot_data,
+            x="dataset",
+            y="value_percent",
+            hue="method_position",
+            col="metric",
+            kind="bar",
+            height=5,
+            aspect=1.2,
+            sharey=False,
+        )
+        grid.set_axis_labels("Evaluation dataset", "Value at ADVERB-selected layer (%)")
+        path = figure_dir / "selected_layer_metrics.png"
+        grid.figure.savefig(path, dpi=180, bbox_inches="tight")
+        plt.close(grid.figure)
+        outputs.append(path)
 
     similarity_path = run_dir / "direction_similarities.csv"
     if similarity_path.exists():
@@ -213,21 +231,21 @@ def plot_sentiment_position_comparison(
             plt.close(figure)
             outputs.append(path)
 
-    loss_path = run_dir / "das_losses.csv"
+    loss_path = run_dir / "das_epoch_metrics.csv"
     if loss_path.exists():
         losses = pd.read_csv(loss_path)
         if not losses.empty:
             grid = sns.relplot(
                 data=losses,
                 x="epoch",
-                y="evaluation_loss",
+                y="validation_loss",
                 hue="fit_position",
                 col="layer",
                 col_wrap=4,
                 kind="line",
                 facet_kws={"sharey": False},
             )
-            grid.set_axis_labels("Epoch", "Normalized logit-difference loss")
+            grid.set_axis_labels("Epoch", "ADVERB validation loss")
             path = figure_dir / "das_loss_by_position_and_layer.png"
             grid.figure.savefig(path, dpi=180, bbox_inches="tight")
             plt.close(grid.figure)

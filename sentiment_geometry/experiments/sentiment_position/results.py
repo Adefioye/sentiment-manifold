@@ -17,40 +17,47 @@ class ExperimentTables:
     metrics: list[dict[str, Any]] = field(default_factory=list)
     patching_records: list[dict[str, Any]] = field(default_factory=list)
     direction_metadata: list[dict[str, Any]] = field(default_factory=list)
-    das_losses: list[dict[str, Any]] = field(default_factory=list)
+    das_epoch_metrics: list[dict[str, Any]] = field(default_factory=list)
     direction_similarities: list[dict[str, Any]] = field(default_factory=list)
 
 
-def select_best_layers(metrics: pd.DataFrame) -> pd.DataFrame:
-    """Select each dataset/metric maximum independently, breaking ties low."""
+def select_layers_by_validation_metric(
+    metrics: pd.DataFrame,
+    *,
+    dataset: str,
+    metric: str = "logit_flip_percent",
+) -> pd.DataFrame:
+    """Select one layer per fitted direction using one declared validation metric."""
 
-    group_columns = ["model", "method", "fit_position", "dataset"]
-    metric_columns = ("logit_difference_percent", "logit_flip_percent")
-    required = {*group_columns, "layer", *metric_columns}
+    group_columns = ["model", "method", "fit_position"]
+    required = {*group_columns, "dataset", "layer", metric}
     missing = sorted(required - set(metrics.columns))
     if missing:
         raise ValueError(f"Cannot select best layers; missing columns: {missing}")
+    candidates = metrics[metrics["dataset"] == dataset].copy()
+    if "phase" in candidates:
+        candidates = candidates[candidates["phase"] == "layer_selection"]
+    if candidates.empty:
+        raise ValueError(f"No layer-selection metrics found for {dataset!r}")
     rows: list[dict] = []
-    ordered = metrics.sort_values([*group_columns, "layer"], kind="stable")
+    ordered = candidates.sort_values([*group_columns, "layer"], kind="stable")
     for keys, group in ordered.groupby(group_columns, sort=False):
-        for metric_column in metric_columns:
-            valid = group.dropna(subset=[metric_column])
-            if valid.empty:
-                selected_layer: int | None = None
-                value = float("nan")
-            else:
-                selected = valid.loc[valid[metric_column].idxmax()]
-                selected_layer = int(selected["layer"])
-                value = float(selected[metric_column])
-            rows.append(
-                {
-                    **dict(zip(group_columns, keys)),
-                    "metric": metric_column.removesuffix("_percent"),
-                    "metric_column": metric_column,
-                    "layer": selected_layer,
-                    "value_percent": value,
-                }
+        valid = group.dropna(subset=[metric])
+        if valid.empty:
+            raise RuntimeError(
+                f"Layer-selection metric {metric!r} is non-finite for {dict(zip(group_columns, keys))}"
             )
+        selected = valid.loc[valid[metric].idxmax()]
+        rows.append(
+            {
+                **dict(zip(group_columns, keys)),
+                "selection_dataset": dataset,
+                "selection_metric": metric,
+                "selected_layer": int(selected["layer"]),
+                "selection_value_percent": float(selected[metric]),
+                "tie_break_rule": "lowest_layer",
+            }
+        )
     return pd.DataFrame(rows)
 
 
@@ -84,4 +91,8 @@ def direction_similarity_rows(
     return rows
 
 
-__all__ = ["ExperimentTables", "direction_similarity_rows", "select_best_layers"]
+__all__ = [
+    "ExperimentTables",
+    "direction_similarity_rows",
+    "select_layers_by_validation_metric",
+]

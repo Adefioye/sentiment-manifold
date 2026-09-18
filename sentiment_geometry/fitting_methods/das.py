@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
 import numpy as np
@@ -14,6 +15,7 @@ from ..models import CausalLMAdapter, TokenizedBatch
 from .base import FitResult
 
 AnswerSpec = dict[int, tuple[str, ...] | list[str]]
+EpochValidator = Callable[[np.ndarray], Mapping[str, float]]
 
 
 @dataclass(frozen=True)
@@ -207,6 +209,8 @@ class DASFitter:
         layer: int,
         answers: AnswerSpec,
         position: str = "focus",
+        epoch_validator: EpochValidator | None = None,
+        checkpoint_metric: str = "post_epoch_train_loss",
     ) -> FitResult:
         if not pairs:
             raise ValueError("DAS requires at least one counterfactual pair")
@@ -227,8 +231,9 @@ class DASFitter:
             weight_decay=self.config.weight_decay,
             betas=(0.9, 0.999),
         )
-        history: list[dict[str, float | int]] = []
-        best_loss = float("inf")
+        history: list[dict[str, float | int | bool]] = []
+        best_metric_value = float("inf")
+        best_epoch: int | None = None
         best_basis: Tensor | None = None
         adapter.model.eval()
         for epoch in range(self.config.epochs):
@@ -247,10 +252,10 @@ class DASFitter:
             train_loss = train_total / len(prepared)
 
             rotation.eval()
-            eval_total = 0.0
+            post_epoch_total = 0.0
             with torch.no_grad():
                 for batch in prepared:
-                    eval_total += float(
+                    post_epoch_total += float(
                         self._batch_loss(
                             adapter,
                             batch,
@@ -260,13 +265,38 @@ class DASFitter:
                             corrupted_baseline,
                         )
                     )
-            eval_loss = eval_total / len(prepared)
-            history.append({"epoch": epoch, "train_loss": train_loss, "evaluation_loss": eval_loss})
-            if train_loss < best_loss:
-                best_loss = train_loss
+            post_epoch_train_loss = post_epoch_total / len(prepared)
+            row: dict[str, float | int | bool] = {
+                "epoch": epoch,
+                "train_loss": train_loss,
+                "post_epoch_train_loss": post_epoch_train_loss,
+            }
+            if epoch_validator is not None:
+                candidate = rotation.weight[:, : self.dimension].detach().cpu().numpy()
+                candidate = candidate[:, 0] if self.dimension == 1 else candidate
+                row.update(
+                    {
+                        key: float(value)
+                        for key, value in epoch_validator(candidate).items()
+                    }
+                )
+            if checkpoint_metric not in row:
+                raise ValueError(
+                    f"DAS checkpoint metric {checkpoint_metric!r} was not produced at epoch {epoch}"
+                )
+            metric_value = float(row[checkpoint_metric])
+            history.append(row)
+            if np.isfinite(metric_value) and metric_value < best_metric_value:
+                best_metric_value = metric_value
+                best_epoch = epoch
                 best_basis = rotation.weight[:, : self.dimension].detach().clone()
 
-        assert best_basis is not None
+        if best_basis is None or best_epoch is None:
+            raise RuntimeError(
+                f"DAS checkpoint metric {checkpoint_metric!r} was non-finite for every epoch"
+            )
+        for row in history:
+            row["selected_epoch"] = int(row["epoch"]) == best_epoch
         direction = best_basis.cpu().numpy()
         mean_diff = activations[labels == 1].mean(0) - activations[labels == 0].mean(0)
         orientation_dot = float(direction[:, 0] @ mean_diff)
@@ -282,7 +312,10 @@ class DASFitter:
                 "epochs": self.config.epochs,
                 "clean_baseline_margin": clean_baseline,
                 "corrupted_baseline_margin": corrupted_baseline,
-                "best_train_loss": best_loss,
+                "best_train_loss": min(float(row["post_epoch_train_loss"]) for row in history),
+                "checkpoint_selection_metric": checkpoint_metric,
+                "best_checkpoint_metric": best_metric_value,
+                "selected_epoch": best_epoch,
                 "loss_history": history,
                 "orientation_convention": "negative_to_positive_first_basis_vector",
                 "orientation_reference": "toy_train_class_mean_difference",

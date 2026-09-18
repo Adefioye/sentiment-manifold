@@ -1,7 +1,8 @@
 from .language_model import OpenWebTextResult, evaluate_openwebtext_ablation
-from .patching import PatchingResult, evaluate_directional_patching
+from .patching import DirectionalPatchingEvaluator, PatchingResult, evaluate_directional_patching
 
 __all__ = [
+    "DirectionalPatchingEvaluator",
     "OpenWebTextResult",
     "PatchingResult",
     "evaluate_directional_patching",

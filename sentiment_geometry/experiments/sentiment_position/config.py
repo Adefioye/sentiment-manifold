@@ -14,6 +14,7 @@ from ...models.config import ModelConfig
 SUPPORTED_FITTING_METHODS = ("mean_diff", "logistic_regression", "das")
 SUPPORTED_FITTING_POSITIONS = ("adjective", "verb", "summary", "final")
 SUPPORTED_TOY_EVALUATIONS = ("toy_adjectives", "toy_verbs", "toy_adverbs")
+SUPPORTED_EVALUATIONS = (*SUPPORTED_TOY_EVALUATIONS, "sst")
 
 
 @dataclass
@@ -46,11 +47,23 @@ class SweepConfig:
 
 
 @dataclass
+class SelectionConfig:
+    das_checkpoint_dataset: str = "toy_adverbs"
+    das_checkpoint_metric: str = "logit_difference_loss"
+    layer_dataset: str = "toy_adverbs"
+    layer_metric: str = "logit_flip_percent"
+    final_evaluations: list[str] = field(
+        default_factory=lambda: ["toy_adverbs", "toy_adjectives", "sst"]
+    )
+
+
+@dataclass
 class SentimentPositionExperimentConfig:
     seed: int = 0
     models: list[ModelConfig] = field(default_factory=list)
     data: EvaluationDataConfig = field(default_factory=EvaluationDataConfig)
     sweep: SweepConfig = field(default_factory=SweepConfig)
+    selection: SelectionConfig = field(default_factory=SelectionConfig)
     fitting: FittingConfig = field(default_factory=FittingConfig)
     das: DASConfig = field(default_factory=DASConfig)
     source_path: Path | None = None
@@ -67,6 +80,7 @@ class SentimentPositionExperimentConfig:
             models=models,
             data=EvaluationDataConfig(**raw.get("data", {})),
             sweep=SweepConfig(**raw.get("sweep", {})),
+            selection=SelectionConfig(**raw.get("selection", {})),
             fitting=FittingConfig(**raw.get("fitting", {})),
             das=DASConfig(**raw.get("das", {})),
             source_path=path,
@@ -113,6 +127,38 @@ class SentimentPositionExperimentConfig:
             raise ValueError(
                 f"Toy evaluations must be selected from {SUPPORTED_TOY_EVALUATIONS}; "
                 f"got {unknown_toy_evaluations}"
+            )
+        active_evaluations = {*self.data.toy_evaluations, "sst"}
+        if self.selection.das_checkpoint_dataset not in active_evaluations:
+            raise ValueError(
+                "DAS checkpoint dataset must be active; got "
+                f"{self.selection.das_checkpoint_dataset!r}"
+            )
+        if self.selection.layer_dataset not in active_evaluations:
+            raise ValueError(
+                f"Layer-selection dataset must be active; got {self.selection.layer_dataset!r}"
+            )
+        if self.selection.das_checkpoint_dataset != self.selection.layer_dataset:
+            raise ValueError(
+                "DAS checkpoint and layer selection must reuse the same evaluation dataset"
+            )
+        if self.selection.das_checkpoint_metric != "logit_difference_loss":
+            raise ValueError("DAS checkpoint metric must be 'logit_difference_loss'")
+        if self.selection.layer_metric != "logit_flip_percent":
+            raise ValueError("Layer-selection metric must be 'logit_flip_percent'")
+        if not self.selection.final_evaluations:
+            raise ValueError("At least one final evaluation dataset is required")
+        if len(self.selection.final_evaluations) != len(set(self.selection.final_evaluations)):
+            raise ValueError("Final evaluation datasets must be unique")
+        unknown_final = sorted(set(self.selection.final_evaluations) - set(SUPPORTED_EVALUATIONS))
+        inactive_final = sorted(set(self.selection.final_evaluations) - active_evaluations)
+        if unknown_final:
+            raise ValueError(f"Unsupported final evaluation datasets: {unknown_final}")
+        if inactive_final:
+            raise ValueError(f"Final evaluation datasets are not active: {inactive_final}")
+        if self.selection.layer_dataset not in self.selection.final_evaluations:
+            raise ValueError(
+                "Layer-selection dataset must also be included in final evaluations"
             )
         missing_sst = [
             model.name for model in self.models if model.name not in self.data.sst_configs
@@ -210,9 +256,11 @@ def apply_config_overrides(
 
 
 __all__ = [
+    "SUPPORTED_EVALUATIONS",
     "SUPPORTED_FITTING_METHODS",
     "SUPPORTED_FITTING_POSITIONS",
     "SUPPORTED_TOY_EVALUATIONS",
+    "SelectionConfig",
     "SentimentPositionExperimentConfig",
     "apply_config_overrides",
     "comparison_boundaries",

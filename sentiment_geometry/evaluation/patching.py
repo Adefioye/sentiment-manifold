@@ -127,139 +127,210 @@ def _directional_editor(
     return editor
 
 
-def evaluate_directional_patching(
-    adapter: CausalLMAdapter,
-    pairs: list[CounterfactualPair],
-    direction: np.ndarray,
-    *,
-    layer: int,
-    answers: dict[int, tuple[str, ...] | list[str]],
-    position: str,
-    batch_size: int = 16,
-) -> PatchingResult:
-    if not pairs:
-        raise ValueError("Directional patching requires non-empty pairs")
-    vector = torch.as_tensor(direction, device=adapter.device_spec.device, dtype=torch.float32)
-    answer_ids = {
-        label: torch.tensor(
-            [adapter.single_token_id(answer) for answer in values],
-            device=adapter.device_spec.device,
-        )
-        for label, values in answers.items()
-    }
-    if len(answer_ids[0]) != len(answer_ids[1]) or not len(answer_ids[0]):
-        raise ValueError("Positive and negative answers must form non-empty aligned pairs")
-    corrupted_margins: list[Tensor] = []
-    clean_margins: list[Tensor] = []
-    patched_margins: list[Tensor] = []
-    corrupted_logit_differences: list[Tensor] = []
-    clean_logit_differences: list[Tensor] = []
-    patched_logit_differences: list[Tensor] = []
-    all_target_labels: list[Tensor] = []
-    flips: list[Tensor] = []
-    records: list[dict] = []
+@dataclass(frozen=True)
+class _PreparedPatchingBatch:
+    pairs: tuple[CounterfactualPair, ...]
+    clean: TokenizedBatch
+    corrupted: TokenizedBatch
+    clean_boundary: Tensor
+    target_labels: Tensor
+    clean_logit_differences: Tensor
+    corrupted_logit_differences: Tensor
 
-    for start in range(0, len(pairs), batch_size):
-        selected = pairs[start : start + batch_size]
-        clean = adapter.tokenize([pair.clean for pair in selected]).to(adapter.device_spec.device)
-        corrupted = adapter.tokenize([pair.corrupted for pair in selected]).to(
-            adapter.device_spec.device
-        )
-        if position == "all" and not torch.equal(
-            clean.attention_mask.sum(1), corrupted.attention_mask.sum(1)
-        ):
-            raise ValueError("Patching pairs must have equal token lengths")
-        target_labels = torch.tensor(
-            [pair.clean.label for pair in selected], device=adapter.device_spec.device
-        )
-        with torch.inference_mode():
-            clean_boundary = adapter.boundary_activations(clean, layer)
-            clean_output = adapter.model(
-                input_ids=clean.input_ids, attention_mask=clean.attention_mask, use_cache=False
-            )
-            corrupted_output = adapter.model(
-                input_ids=corrupted.input_ids,
-                attention_mask=corrupted.attention_mask,
-                use_cache=False,
-            )
 
-            editor = _directional_editor(
-                adapter,
-                clean=clean,
-                corrupted=corrupted,
-                clean_boundary=clean_boundary,
-                vector=vector,
-                position=position,
+class DirectionalPatchingEvaluator:
+    """Cache direction-independent baselines for repeated patching evaluations."""
+
+    def __init__(
+        self,
+        adapter: CausalLMAdapter,
+        pairs: list[CounterfactualPair],
+        *,
+        layer: int,
+        answers: dict[int, tuple[str, ...] | list[str]],
+        position: str,
+        batch_size: int = 16,
+    ) -> None:
+        if not pairs:
+            raise ValueError("Directional patching requires non-empty pairs")
+        self.adapter = adapter
+        self.layer = layer
+        self.position = position
+        self.answer_ids = {
+            label: torch.tensor(
+                [adapter.single_token_id(answer) for answer in values],
+                device=adapter.device_spec.device,
             )
-            with adapter.edit_boundary(layer, editor):
-                patched_output = adapter.model(
+            for label, values in answers.items()
+        }
+        if len(self.answer_ids[0]) != len(self.answer_ids[1]) or not len(self.answer_ids[0]):
+            raise ValueError("Positive and negative answers must form non-empty aligned pairs")
+        self.batches = self._prepare(pairs, batch_size)
+        self.n_pairs = len(pairs)
+
+    def _prepare(
+        self, pairs: list[CounterfactualPair], batch_size: int
+    ) -> tuple[_PreparedPatchingBatch, ...]:
+        prepared: list[_PreparedPatchingBatch] = []
+        device = self.adapter.device_spec.device
+        for start in range(0, len(pairs), batch_size):
+            selected = tuple(pairs[start : start + batch_size])
+            clean = self.adapter.tokenize([pair.clean for pair in selected]).to(device)
+            corrupted = self.adapter.tokenize([pair.corrupted for pair in selected]).to(device)
+            if self.position == "all" and not torch.equal(
+                clean.attention_mask.sum(1), corrupted.attention_mask.sum(1)
+            ):
+                raise ValueError("Patching pairs must have equal token lengths")
+            targets = torch.tensor([pair.clean.label for pair in selected], device=device)
+            rows = torch.arange(len(selected), device=device)
+            with torch.inference_mode():
+                clean_boundary = self.adapter.boundary_activations(clean, self.layer).detach()
+                clean_output = self.adapter.model(
+                    input_ids=clean.input_ids,
+                    attention_mask=clean.attention_mask,
+                    use_cache=False,
+                )
+                corrupted_output = self.adapter.model(
                     input_ids=corrupted.input_ids,
                     attention_mask=corrupted.attention_mask,
                     use_cache=False,
                 )
-
-        rows = torch.arange(len(selected), device=adapter.device_spec.device)
-        corrupted_pos = adapter.last_positions(corrupted.attention_mask)
-        clean_pos = adapter.last_positions(clean.attention_mask)
-        corrupted_logits = corrupted_output.logits[rows, corrupted_pos].float()
-        clean_logits = clean_output.logits[rows, clean_pos].float()
-        patched_logits = patched_output.logits[rows, corrupted_pos].float()
-        batch_corrupted_logit_differences = _logit_differences(corrupted_logits, answer_ids)
-        batch_clean_logit_differences = _logit_differences(clean_logits, answer_ids)
-        batch_patched_logit_differences = _logit_differences(patched_logits, answer_ids)
-        corrupted_logit_differences.append(batch_corrupted_logit_differences.cpu())
-        clean_logit_differences.append(batch_clean_logit_differences.cpu())
-        patched_logit_differences.append(batch_patched_logit_differences.cpu())
-        all_target_labels.append(target_labels.cpu())
-        batch_corrupted_margins = _target_signed_margins(
-            batch_corrupted_logit_differences, target_labels
-        ).cpu()
-        batch_clean_margins = _target_signed_margins(
-            batch_clean_logit_differences, target_labels
-        ).cpu()
-        batch_patched_margins = _target_signed_margins(
-            batch_patched_logit_differences, target_labels
-        ).cpu()
-        corrupted_margins.append(batch_corrupted_margins)
-        clean_margins.append(batch_clean_margins)
-        patched_margins.append(batch_patched_margins)
-        batch_flips = (
-            _target_directed_logit_flips(
-                batch_corrupted_logit_differences,
-                batch_patched_logit_differences,
-                target_labels,
+            clean_positions = self.adapter.last_positions(clean.attention_mask)
+            corrupted_positions = self.adapter.last_positions(corrupted.attention_mask)
+            clean_logits = clean_output.logits[rows, clean_positions].float()
+            corrupted_logits = corrupted_output.logits[rows, corrupted_positions].float()
+            prepared.append(
+                _PreparedPatchingBatch(
+                    pairs=selected,
+                    clean=clean,
+                    corrupted=corrupted,
+                    clean_boundary=clean_boundary,
+                    target_labels=targets,
+                    clean_logit_differences=_logit_differences(
+                        clean_logits, self.answer_ids
+                    ).detach(),
+                    corrupted_logit_differences=_logit_differences(
+                        corrupted_logits, self.answer_ids
+                    ).detach(),
+                )
             )
-            .float()
-            .cpu()
+        return tuple(prepared)
+
+    def evaluate(self, direction: np.ndarray) -> PatchingResult:
+        vector = torch.as_tensor(
+            direction, device=self.adapter.device_spec.device, dtype=torch.float32
         )
-        flips.append(batch_flips)
-        for index, pair in enumerate(selected):
-            corrupted_value = float(batch_corrupted_margins[index])
-            clean_value = float(batch_clean_margins[index])
-            patched_value = float(batch_patched_margins[index])
-            denominator = clean_value - corrupted_value
-            records.append(
-                {
-                    "clean_id": pair.clean.example_id,
-                    "corrupted_id": pair.corrupted.example_id,
-                    "clean_label": pair.clean.label,
-                    "corrupted_label": pair.corrupted.label,
-                    "clean_logit_diff": float(batch_clean_logit_differences[index]),
-                    "corrupted_logit_diff": float(batch_corrupted_logit_differences[index]),
-                    "patched_logit_diff": float(batch_patched_logit_differences[index]),
-                    "clean_margin": clean_value,
-                    "corrupted_margin": corrupted_value,
-                    "patched_margin": patched_value,
-                    "recovery": float("nan")
-                    if abs(denominator) < 1e-8
-                    else (patched_value - corrupted_value) / denominator,
-                    "recovery_percent": float("nan")
-                    if abs(denominator) < 1e-8
-                    else 100.0 * (patched_value - corrupted_value) / denominator,
-                    "flipped": float(batch_flips[index]),
-                }
-            )
+        corrupted_margins: list[Tensor] = []
+        clean_margins: list[Tensor] = []
+        patched_margins: list[Tensor] = []
+        corrupted_logit_differences: list[Tensor] = []
+        clean_logit_differences: list[Tensor] = []
+        patched_logit_differences: list[Tensor] = []
+        all_target_labels: list[Tensor] = []
+        flips: list[Tensor] = []
+        records: list[dict] = []
 
+        for batch in self.batches:
+            editor = _directional_editor(
+                self.adapter,
+                clean=batch.clean,
+                corrupted=batch.corrupted,
+                clean_boundary=batch.clean_boundary,
+                vector=vector,
+                position=self.position,
+            )
+            with torch.inference_mode(), self.adapter.edit_boundary(self.layer, editor):
+                patched_output = self.adapter.model(
+                    input_ids=batch.corrupted.input_ids,
+                    attention_mask=batch.corrupted.attention_mask,
+                    use_cache=False,
+                )
+            rows = torch.arange(
+                len(batch.pairs), device=self.adapter.device_spec.device
+            )
+            positions = self.adapter.last_positions(batch.corrupted.attention_mask)
+            patched_logits = patched_output.logits[rows, positions].float()
+            patched_differences = _logit_differences(patched_logits, self.answer_ids)
+            clean_differences = batch.clean_logit_differences
+            corrupted_differences = batch.corrupted_logit_differences
+            targets = batch.target_labels
+
+            clean_logit_differences.append(clean_differences.cpu())
+            corrupted_logit_differences.append(corrupted_differences.cpu())
+            patched_logit_differences.append(patched_differences.cpu())
+            all_target_labels.append(targets.cpu())
+            clean_batch_margins = _target_signed_margins(clean_differences, targets).cpu()
+            corrupted_batch_margins = _target_signed_margins(
+                corrupted_differences, targets
+            ).cpu()
+            patched_batch_margins = _target_signed_margins(patched_differences, targets).cpu()
+            clean_margins.append(clean_batch_margins)
+            corrupted_margins.append(corrupted_batch_margins)
+            patched_margins.append(patched_batch_margins)
+            batch_flips = (
+                _target_directed_logit_flips(
+                    corrupted_differences,
+                    patched_differences,
+                    targets,
+                )
+                .float()
+                .cpu()
+            )
+            flips.append(batch_flips)
+            for index, pair in enumerate(batch.pairs):
+                corrupted_value = float(corrupted_batch_margins[index])
+                clean_value = float(clean_batch_margins[index])
+                patched_value = float(patched_batch_margins[index])
+                denominator = clean_value - corrupted_value
+                records.append(
+                    {
+                        "clean_id": pair.clean.example_id,
+                        "corrupted_id": pair.corrupted.example_id,
+                        "clean_label": pair.clean.label,
+                        "corrupted_label": pair.corrupted.label,
+                        "clean_logit_diff": float(clean_differences[index]),
+                        "corrupted_logit_diff": float(corrupted_differences[index]),
+                        "patched_logit_diff": float(patched_differences[index]),
+                        "clean_margin": clean_value,
+                        "corrupted_margin": corrupted_value,
+                        "patched_margin": patched_value,
+                        "recovery": float("nan")
+                        if abs(denominator) < 1e-8
+                        else (patched_value - corrupted_value) / denominator,
+                        "recovery_percent": float("nan")
+                        if abs(denominator) < 1e-8
+                        else 100.0 * (patched_value - corrupted_value) / denominator,
+                        "flipped": float(batch_flips[index]),
+                    }
+                )
+
+        return _summarize_patching(
+            clean_margins=clean_margins,
+            corrupted_margins=corrupted_margins,
+            patched_margins=patched_margins,
+            clean_logit_differences=clean_logit_differences,
+            corrupted_logit_differences=corrupted_logit_differences,
+            patched_logit_differences=patched_logit_differences,
+            target_labels=all_target_labels,
+            flips=flips,
+            records=records,
+            n_pairs=self.n_pairs,
+        )
+
+
+def _summarize_patching(
+    *,
+    clean_margins: list[Tensor],
+    corrupted_margins: list[Tensor],
+    patched_margins: list[Tensor],
+    clean_logit_differences: list[Tensor],
+    corrupted_logit_differences: list[Tensor],
+    patched_logit_differences: list[Tensor],
+    target_labels: list[Tensor],
+    flips: list[Tensor],
+    records: list[dict],
+    n_pairs: int,
+) -> PatchingResult:
     corrupted_margin = torch.cat(corrupted_margins).mean().item()
     clean_margin = torch.cat(clean_margins).mean().item()
     patched_margin = torch.cat(patched_margins).mean().item()
@@ -269,7 +340,7 @@ def evaluate_directional_patching(
         if abs(denominator) < 1e-8
         else (patched_margin - corrupted_margin) / denominator
     )
-    targets = torch.cat(all_target_labels)
+    targets = torch.cat(target_labels)
     centered_corrupted_margins = _centered_target_signed_margins(
         torch.cat(corrupted_logit_differences), targets
     )
@@ -298,6 +369,27 @@ def evaluate_directional_patching(
         corrupted_accuracy=float(corrupted_accuracy),
         clean_accuracy=float(clean_accuracy),
         patched_accuracy=float(patched_accuracy),
-        n_pairs=len(pairs),
+        n_pairs=n_pairs,
         records=tuple(records),
     )
+
+
+def evaluate_directional_patching(
+    adapter: CausalLMAdapter,
+    pairs: list[CounterfactualPair],
+    direction: np.ndarray,
+    *,
+    layer: int,
+    answers: dict[int, tuple[str, ...] | list[str]],
+    position: str,
+    batch_size: int = 16,
+) -> PatchingResult:
+    evaluator = DirectionalPatchingEvaluator(
+        adapter,
+        pairs,
+        layer=layer,
+        answers=answers,
+        position=position,
+        batch_size=batch_size,
+    )
+    return evaluator.evaluate(direction)

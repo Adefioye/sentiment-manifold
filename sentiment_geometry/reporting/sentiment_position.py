@@ -13,7 +13,7 @@ from matplotlib.figure import Figure
 MODEL_ORDER = ("gpt2-small", "qwen-0.6b")
 POSITION_ORDER = ("adjective", "verb", "summary", "final")
 METHOD_ORDER = ("mean_diff", "logistic_regression", "das")
-DATASET_ORDER = ("toy_adjectives", "toy_verbs", "toy_adverbs", "sst")
+DATASET_ORDER = ("toy_adverbs", "toy_adjectives", "sst")
 
 MODEL_LABELS = {
     "gpt2-small": "GPT-2 Small",
@@ -39,6 +39,7 @@ DATASET_LABELS = {
 METRIC_LABELS = {
     "logit_difference": "Logit difference",
     "logit_flip": "Logit flip",
+    "sign_flip": "Literal sign flip",
 }
 METHOD_COLORS = {
     "mean_diff": "#0072B2",
@@ -73,7 +74,8 @@ class SentimentPositionReportData:
     results_dir: Path
     models: tuple[str, ...]
     metrics: pd.DataFrame
-    best_layers: pd.DataFrame
+    layer_selection: pd.DataFrame
+    selected_metrics: pd.DataFrame
     direction_similarities: pd.DataFrame
     dataset_summary: pd.DataFrame
 
@@ -86,7 +88,8 @@ class SentimentPositionReportData:
     ) -> SentimentPositionReportData:
         results_dir = Path(results_dir)
         metrics = _load_model_table(results_dir, models, "metrics.csv")
-        best_layers = _load_model_table(results_dir, models, "best_layers.csv")
+        layer_selection = _load_model_table(results_dir, models, "layer_selection.csv")
+        selected_metrics = _load_model_table(results_dir, models, "selected_metrics.csv")
         direction_similarities = _load_model_table(
             results_dir, models, "direction_similarities.csv"
         )
@@ -105,9 +108,31 @@ class SentimentPositionReportData:
             table_name="metrics.csv",
         )
         _require_columns(
-            best_layers,
-            {"model", "method", "fit_position", "dataset", "metric", "layer", "value_percent"},
-            table_name="best_layers.csv",
+            layer_selection,
+            {
+                "model",
+                "method",
+                "fit_position",
+                "selection_dataset",
+                "selection_metric",
+                "selected_layer",
+                "selection_value_percent",
+            },
+            table_name="layer_selection.csv",
+        )
+        _require_columns(
+            selected_metrics,
+            {
+                "model",
+                "method",
+                "fit_position",
+                "layer",
+                "dataset",
+                "logit_difference_percent",
+                "logit_flip_percent",
+                "sign_flip_percent",
+            },
+            table_name="selected_metrics.csv",
         )
         _require_columns(
             direction_similarities,
@@ -127,7 +152,8 @@ class SentimentPositionReportData:
             results_dir=results_dir,
             models=models,
             metrics=metrics,
-            best_layers=best_layers,
+            layer_selection=layer_selection,
+            selected_metrics=selected_metrics,
             direction_similarities=direction_similarities,
             dataset_summary=dataset_summary,
         )
@@ -142,35 +168,39 @@ class SentimentPositionReportData:
         return "toy_train" in set(self.metrics["dataset"])
 
 
-def figure4_style_table(
-    best_layers: pd.DataFrame,
+def selected_layer_table(
+    selected_metrics: pd.DataFrame,
     *,
     model: str,
     fit_position: str,
     datasets: tuple[str, ...] = DATASET_ORDER,
     methods: tuple[str, ...] = METHOD_ORDER,
 ) -> pd.DataFrame:
-    """Format best-across-layer causal metrics in the style of Tigges et al. Figure 4."""
+    """Format every metric at the single ADVERB-selected layer."""
 
-    subset = best_layers[
-        (best_layers["model"] == model) & (best_layers["fit_position"] == fit_position)
+    subset = selected_metrics[
+        (selected_metrics["model"] == model)
+        & (selected_metrics["fit_position"] == fit_position)
+        & selected_metrics["dataset"].isin(datasets)
     ].copy()
     expected = {
-        (method, dataset, metric)
+        (method, dataset)
         for method in methods
         for dataset in datasets
-        for metric in METRIC_LABELS
     }
-    actual = set(zip(subset["method"], subset["dataset"], subset["metric"]))
+    actual = set(zip(subset["method"], subset["dataset"]))
     missing = sorted(expected - actual)
     if missing:
         raise ValueError(
-            f"Best-layer results are incomplete for model={model}, position={fit_position}: {missing}"
+            f"Selected-layer results are incomplete for model={model}, "
+            f"position={fit_position}: {missing}"
         )
-    if subset.duplicated(["method", "dataset", "metric"]).any():
-        raise ValueError(f"Best-layer results contain duplicate cells for {model}/{fit_position}")
+    if subset.duplicated(["method", "dataset"]).any():
+        raise ValueError(
+            f"Selected-layer results contain duplicate cells for {model}/{fit_position}"
+        )
 
-    indexed = subset.set_index(["method", "dataset", "metric"])
+    indexed = subset.set_index(["method", "dataset"])
     columns = [
         f"{DATASET_LABELS.get(dataset, dataset)}\n{METRIC_LABELS[metric]}"
         for dataset in datasets
@@ -181,9 +211,10 @@ def figure4_style_table(
         cells: list[str] = []
         for dataset in datasets:
             for metric in METRIC_LABELS:
-                result = indexed.loc[(method, dataset, metric)]
+                result = indexed.loc[(method, dataset)]
+                metric_column = f"{metric}_percent"
                 cells.append(
-                    f"{float(result['value_percent']):.1f}%\n(L{int(result['layer']):02d})"
+                    f"{float(result[metric_column]):.1f}%\n(L{int(result['layer']):02d})"
                 )
         rows.append(cells)
     return pd.DataFrame(
@@ -353,7 +384,12 @@ def plot_logit_difference_grid(
             )
             for method in methods:
                 method_rows = panel[panel["method"] == method]
-                best = method_rows.loc[method_rows["logit_difference_percent"].idxmax()]
+                selected = method_rows[method_rows["selected_layer"].astype(bool)]
+                if len(selected) != 1:
+                    raise ValueError(
+                        f"Expected one selected layer for {dataset}/{model}/{position}/{method}"
+                    )
+                best = selected.iloc[0]
                 axis.scatter(
                     [best["layer"]],
                     [best["logit_difference_percent"]],
@@ -397,8 +433,8 @@ __all__ = [
     "DATASET_ORDER",
     "MODEL_ORDER",
     "SentimentPositionReportData",
-    "figure4_style_table",
     "plot_cosine_similarity_grid",
     "plot_cross_position_cosines",
     "plot_logit_difference_grid",
+    "selected_layer_table",
 ]

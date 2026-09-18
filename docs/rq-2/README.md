@@ -98,12 +98,15 @@ independently at four prompt-token positions: the adjective (ADJ), verb (VRB), s
 (SUM), and final `is` token (END). ADJ, VRB, and SUM are resolved from character spans through
 each model's tokenizer rather than assumed token indices; END is the last non-padding token. It
 sweeps residual boundaries
-`1..n_layers`; boundary `0` is the embedding residual and is excluded. All-token directional
-patching is then run on three configured evaluation panels:
+`1..n_layers`; boundary `0` is the embedding residual and is excluded. The full ADVERB panel is
+used as validation data for both DAS epoch selection and residual-boundary selection. The selected
+boundary maximizes ADVERB `logit_flip_percent` independently for each model × method ×
+fitting-position direction. That boundary is frozen before evaluation on held-out ToyMovieReview
+adjectives and the model-specific SST `directed_pairs` configuration.
 
-1. held-out ToyMovieReview adjectives;
-2. the upstream SimpleAdverb vocabulary, deduplicated and subject to its exact two-token filter;
-3. the model-specific SST `directed_pairs` configuration from the private Hugging Face dataset.
+ADVERB validation uses the upstream SimpleAdverb vocabulary, deduplicated and subject to its exact
+two-token filter. Every retained ADVERB case is reused for both checkpoint and layer selection; it
+is not presented as an unbiased final result. ADJ and SST never select their own best layers.
 
 The active Toy panels are selected by `data.toy_evaluations`. The current configuration selects
 `toy_adjectives` and `toy_adverbs`; `toy_verbs` remains supported and can be restored through the
@@ -119,7 +122,7 @@ a collision-safe, minute-stamped Google Drive directory. Its artifact audit expe
 directions and 336 Qwen3-0.6B directions.
 The read-only
 [`sentiment-position exploration notebook`](../../notebooks/04_colab_explore_sentiment_position_results.ipynb)
-displays Figure 4-style best-layer tables, cosine similarities, and model-by-position layer curves
+displays frozen-layer metric tables, cosine similarities, and model-by-position layer curves
 from a completed Drive run without saving additional analysis artifacts.
 The same workflow is available as a regular Python API:
 
@@ -148,9 +151,13 @@ to the private SST repository. Checkpoints are resumable.
 
 Each model directory saves `resolved_config.json`, `dataset_summary.csv`, `prompt_manifest.csv`,
 `pair_manifest.csv`, `toy_vocabulary.csv`, `answer_tokens.csv`, `direction_metadata.csv`,
-`das_losses.csv`, `patching_records.csv`, `metrics.csv`, `direction_similarities.csv`, and
-`best_layers.csv`. The best logit-difference and logit-flip boundaries are selected independently
-for every model × method × fitting-position × evaluation-dataset cell. Absolute cosine is the
+`das_epoch_metrics.csv`, `patching_records.csv`, `metrics.csv`, `selected_metrics.csv`,
+`direction_similarities.csv`, and `layer_selection.csv`. `das_epoch_metrics.csv` contains the
+post-epoch training objective and genuine ADVERB validation metrics; `layer_selection.csv` records
+the single ADVERB-logit-flip-selected boundary for every model × method × fitting-position cell.
+`selected_metrics.csv` reports all three causal metrics for ADVERB, ADJ, and SST after rerunning each
+dataset at that frozen boundary. Its ADVERB rows are post-selection evaluations, not reused
+layer-sweep rows. Absolute cosine is the
 primary similarity at boundaries `[1, floor(n_layers/2), n_layers]`; signed cosine is retained for
 audit. For Toy prompts, `prompt_manifest.csv` records `adjective_position`, `verb_position`,
 `summary_position`, and `final_position`, making the tokenizer-resolved ADJ/VRB/SUM/END indices

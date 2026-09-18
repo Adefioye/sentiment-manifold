@@ -93,8 +93,8 @@ cells:
 - `pair_manifest.csv`: exact Toy train/test and SST clean/corrupted IDs, prompt hashes, token IDs,
   labels, and equal-length checks;
 - `direction_metadata.csv`: artifact path, dimensionality, and orientation convention;
-- `das_losses.csv`: one friendly row per method/layer/epoch with train and evaluation loss (present
-  when a DAS method is run);
+- `das_losses.csv`: one row per method/layer/epoch with online and post-epoch training loss (present
+  when a DAS method is run; neither value is a held-out validation loss);
 - `patching_records.csv`: per-pair clean, corrupted, and patched logit differences, margins,
   recovery, and literal flip indicator;
 - `metrics.csv`: per-method/layer aggregate projection and causal metrics;

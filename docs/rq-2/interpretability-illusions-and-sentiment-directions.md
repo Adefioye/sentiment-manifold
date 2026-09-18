@@ -438,7 +438,9 @@ Several details sharpen the interpretation:
 1. The Qwen final boundary is after the last transformer block and before final normalization/readout. At the last token, this is effectively a terminal decision-state intervention. A direction there can be an excellent sentiment controller without identifying where sentiment was computed.
 2. Directional replacement is performed at all positions in the evaluation. Repeated injections can accumulate and interact.
 3. DAS is trained directly on normalized logit-difference recovery. With clean margin greater than corrupt margin, the implemented loss is minimized at clean recovery but becomes *negative* when the patch overshoots. The training objective therefore rewards overshoot unless separately constrained.
-4. Best layers are selected independently for each method, position, dataset, and metric. This creates winner's-curse bias, especially for Qwen with more candidate layer boundaries.
+4. Layers are selected once per method and fitting position using ADVERB logit-flip percent, then
+   frozen for ADJ and SST evaluation. ADVERB is validation data rather than a final result; SST is
+   not used for checkpoint or layer selection.
 5. Some toy OOD sets are tiny (for example, only four directed Qwen verb cases), so extreme percentages can be dominated by a few denominators or examples.
 
 These considerations do not explain away the result. They define the alternative hypotheses the next study must distinguish.

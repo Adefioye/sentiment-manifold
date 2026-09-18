@@ -1,6 +1,7 @@
 """Shared RQ2 preprocessing utilities and dataset-specific entry points."""
 
 from .ait import preprocess_ait
+from .cebab import preprocess_cebab
 from .common import (
     DEFAULT_MAX_PAIRING_PROMPT_TOKENS,
     DEFAULT_PAIRING_MODELS,
@@ -15,6 +16,7 @@ __all__ = [
     "DEFAULT_PAIRING_MODELS",
     "PAIRING_MODEL_SPECS",
     "preprocess_ait",
+    "preprocess_cebab",
     "preprocess_dynasent",
     "preprocess_imdb",
     "preprocess_sst",

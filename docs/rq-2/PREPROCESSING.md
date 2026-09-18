@@ -1,7 +1,7 @@
 # RQ2 preprocessing guide
 
-This workflow prepares AIT V-oc, SST, IMDb, and DynaSent R1/R2 for valence-versus-sentiment
-geometry and causal-transfer experiments.
+This workflow prepares AIT V-oc, SST, IMDb, DynaSent R1/R2, and CEBaB for
+valence-versus-sentiment geometry and causal-transfer experiments.
 
 ## Correctness-filter policy
 
@@ -18,6 +18,10 @@ correct subsets are saved separately for auditing; Pythia predictions never repl
 
 AIT is deliberately different: it supplies the gold-labelled training data used to learn a
 valence direction, so it is not filtered according to a model's existing ability.
+
+CEBaB is also not correctness-filtered during preprocessing. It supplies human-written edits and
+gold review/aspect annotations; baseline correctness should be measured for each target model at
+evaluation time. This avoids permanently selecting the OOD population with a different model.
 
 The shared filtering options for SST, IMDb, and DynaSent are:
 
@@ -173,6 +177,41 @@ Both rounds are processed but remain separate. Gold positive/negative examples a
 neutral, mixed, and no-majority records are excluded before correctness scoring. Only test is
 Pythia-filtered and paired by default.
 
+## CEBaB
+
+```bash
+sentiment-geometry preprocess-cebab \
+  --dataset-name CEBaB/CEBaB \
+  --train-split train_inclusive \
+  --output-dir data/processed/cebab-binary
+```
+
+The default uses the original authors' `review_majority`, not the median `rating` introduced by
+the simplified `EleutherAI/CEBaB` version. It implements the authors' binary task: ratings 1–2 are
+negative, rating 3 and `no majority` are excluded, and ratings 4–5 are positive. The original
+1–5 majority rating, the full review-label distribution, all four validated aspect-majority
+labels, `original_id`, `edit_id`, `edit_type`, and `edit_goal` remain available for auditing.
+
+`train_inclusive` is mapped to output `train` by default because it retains the human edits. Use
+`--train-split train_exclusive` or `--train-split train_observational` only as an explicit design
+choice. Validation and test are never remapped across original-review families.
+
+In addition to generic equal-length positive/negative pairs, CEBaB writes:
+
+- `counterfactual_pairs`: every retained edited review paired with the retained original sharing
+  its `original_id`;
+- `polarity_flip_pairs`: the subset whose derived binary labels differ;
+- `<model>_counterfactual_matched_pairs`: polarity flips with equal full-prompt length for that
+  tokenizer;
+- `<model>_counterfactual_directed_pairs`: both activation-donor directions for those matches;
+- corresponding `common_counterfactual_*` configs requiring equality under all selected
+  tokenizers.
+
+For a locked binary OOD test of a ToyMovieReview direction, use the test split of
+`polarity_flip_pairs` for final-token interventions, or the tokenizer-specific counterfactual
+directed configuration for Tigges-style all-token replacement. Do not select a layer or strength
+using the CEBaB test split.
+
 ## Output configurations
 
 SST writes each configuration below with a `tigges_` or `neutral_removed_` prefix:
@@ -188,6 +227,9 @@ SST writes each configuration below with a `tigges_` or `neutral_removed_` prefi
 IMDb writes `binary`, `pythia_scored`, `pythia_correct`, and the generic pairing configurations.
 DynaSent writes the same family with `r1_` or `r2_` prefixes. AIT writes `binary` and generic
 pairing configurations only; it has no `pythia_*` configurations.
+
+CEBaB writes `binary`, the generic pairing configurations, `counterfactual_pairs`,
+`polarity_flip_pairs`, and tokenizer-specific/common counterfactual matched and directed pairs.
 
 Directional rows use `source_*` for the activation donor carrying the desired label and `target_*`
 for the receiver before patching. Thus `negative_to_positive` has a positive source and negative

@@ -4,6 +4,13 @@ from typing import ClassVar
 import pytest
 
 from sentiment_geometry.datasets.preprocessing.ait import load_ait_binary, preprocess_ait
+from sentiment_geometry.datasets.preprocessing.cebab import (
+    cebab_binary_label,
+    cebab_binary_rows,
+    make_equal_length_counterfactual_matches,
+    make_original_edit_pairs,
+    preprocess_cebab,
+)
 from sentiment_geometry.datasets.preprocessing.common import (
     PairingModelSpec,
     annotate_token_lengths,
@@ -265,6 +272,154 @@ def test_ait_pipeline_saves_binary_and_pairing_configs(tmp_path):
     assert result.metadata["counts"]["pairing"]["gpt2-small"]["matched_pairs"] == 3
     assert "correctness_filter" not in result.metadata
     assert (result.output_dir / "metadata.json").is_file()
+
+
+def _cebab_row(
+    example_id,
+    original_id,
+    rating,
+    text,
+    *,
+    is_original,
+    edit_type=None,
+    edit_goal=None,
+):
+    return {
+        "id": example_id,
+        "original_id": original_id,
+        "edit_id": example_id.split("_")[-1],
+        "is_original": is_original,
+        "edit_goal": edit_goal,
+        "edit_type": edit_type,
+        "description": text,
+        "review_majority": str(rating),
+        "review_label_distribution": {str(rating): 5},
+        "food_aspect_majority": "Positive" if rating in {4, 5} else "Negative",
+        "ambiance_aspect_majority": "unknown",
+        "service_aspect_majority": "unknown",
+        "noise_aspect_majority": "unknown",
+    }
+
+
+def _cebab_fixture():
+    train = [
+        _cebab_row("000001_000000", "000001", 1, "very bad", is_original=True),
+        _cebab_row(
+            "000001_000001",
+            "000001",
+            5,
+            "very good",
+            is_original=False,
+            edit_type="food",
+            edit_goal="Positive",
+        ),
+        _cebab_row("000002_000000", "000002", 3, "merely okay", is_original=True),
+    ]
+    train[0]["review_label_distribution"] = "{'1': 5}"
+    validation = [
+        _cebab_row("000003_000000", "000003", 4, "quite good", is_original=True),
+        _cebab_row(
+            "000003_000001",
+            "000003",
+            2,
+            "quite bad",
+            is_original=False,
+            edit_type="food",
+            edit_goal="Negative",
+        ),
+    ]
+    test = [
+        _cebab_row("000004_000000", "000004", 2, "very bad", is_original=True),
+        _cebab_row(
+            "000004_000001",
+            "000004",
+            4,
+            "very good",
+            is_original=False,
+            edit_type="food",
+            edit_goal="Positive",
+        ),
+    ]
+    return {"train_inclusive": train, "validation": validation, "test": test}
+
+
+def test_cebab_binary_mapping_matches_authors_binary_task():
+    assert [cebab_binary_label(value) for value in ("1", "2", "3", "4", "5")] == [
+        0,
+        0,
+        None,
+        1,
+        1,
+    ]
+    assert cebab_binary_label("no majority") is None
+
+
+def test_cebab_normalization_keeps_majority_rating_as_provenance():
+    rows, metadata = cebab_binary_rows(_cebab_fixture())
+    assert len(rows) == 6
+    assert {row["label"] for row in rows} == {0, 1}
+    assert {row["review_rating"] for row in rows} == {1, 2, 4, 5}
+    assert metadata["excluded"] == {"neutral_rating_3": 1, "no_majority": 0}
+    assert rows[1]["edited_aspect_majority"] == "Positive"
+    assert rows[0]["review_label_distribution"] == '{"1":5}'
+    assert rows[1]["review_label_distribution"] == '{"5":5}'
+
+
+def test_cebab_human_counterfactual_pairs_remain_grouped_and_equal_length():
+    rows, _ = cebab_binary_rows(_cebab_fixture())
+    specs = resolve_pairing_models(["gpt2-small"])
+    annotated, _ = annotate_token_lengths(
+        rows,
+        specs=specs,
+        tokenizers={"gpt2-small": _WhitespaceTokenizer()},
+    )
+    pairs = make_original_edit_pairs(annotated)
+    assert len(pairs) == 3
+    assert all(pair["polarity_flipped"] for pair in pairs)
+    assert all(pair["original_id"] in pair["pair_id"] for pair in pairs)
+
+    matches = make_equal_length_counterfactual_matches(
+        annotated,
+        specs=specs,
+        pairing_model="gpt2-small",
+        splits=("test",),
+    )
+    assert len(matches) == 1
+    assert matches[0]["positive_example_id"].endswith("000004_000001")
+    assert matches[0]["negative_is_original"] is True
+
+
+def test_cebab_pipeline_saves_binary_generic_and_counterfactual_configs(tmp_path):
+    result = preprocess_cebab(
+        output_dir=tmp_path / "cebab",
+        source_dataset=_cebab_fixture(),
+        pairing_models=["gpt2-small"],
+        tokenizers={"gpt2-small": _WhitespaceTokenizer()},
+    )
+    assert set(result.datasets) == {
+        "binary",
+        "pairing_candidates",
+        "gpt2_small_matched_pairs",
+        "gpt2_small_directed_pairs",
+        "common_matched_pairs",
+        "common_directed_pairs",
+        "counterfactual_pairs",
+        "polarity_flip_pairs",
+        "gpt2_small_counterfactual_matched_pairs",
+        "gpt2_small_counterfactual_directed_pairs",
+        "common_counterfactual_matched_pairs",
+        "common_counterfactual_directed_pairs",
+    }
+    assert result.metadata["counts"]["binary_rows"] == 6
+    assert result.metadata["counts"]["counterfactual"]["polarity_flip_pairs"] == 3
+    assert result.metadata["counts"]["counterfactual"]["equal_length"]["gpt2-small"] == {
+        "matched_pairs": 1,
+        "directed_pairs": 2,
+    }
+    generic_match = result.datasets["gpt2_small_matched_pairs"]["test"][0]
+    assert generic_match["positive_source_score"] == 4.0
+    assert generic_match["negative_source_score"] == 2.0
+    assert result.metadata["label_source"].startswith("review_majority")
 
 
 def test_multi_config_card_maps_each_config_to_its_own_directory():

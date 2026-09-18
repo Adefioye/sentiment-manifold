@@ -3,7 +3,7 @@
 ## Research question
 
 How well do valence directions learned from AIT V-oc align with sentiment directions, and how
-causally useful are those directions on SST, IMDb, and DynaSent across model families?
+causally useful are those directions on SST, IMDb, DynaSent, and CEBaB across model families?
 
 Use Difference-in-means, logistic regression and DAS fitting methods for learning `sentiment direction` and `valence direction`.
 
@@ -21,6 +21,8 @@ Use Difference-in-means, logistic regression and DAS fitting methods for learnin
   collapsed to binary polarity for pairing, but examples are not correctness-filtered by a model.
 - SST, IMDb, and DynaSent are zero-shot evaluation datasets. Pythia-2.8B must agree with each
   dataset's gold binary label before an example can enter an equal-length patching pair.
+- CEBaB is a human-counterfactual OOD evaluation dataset. It uses the authors' majority rating,
+  keeps original/edit families grouped, and defers correctness selection to each evaluated model.
 - Gold labels are never replaced by Pythia predictions.
 - Model-specific pairs have equal full-prompt length under the selected tokenizer. Common pairs
   have equal length under all four configured tokenizers.

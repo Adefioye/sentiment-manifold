@@ -27,8 +27,10 @@ sentiment-geometry plot --run-dir outputs/results/gpt2-small
 Model aliases are `gpt2-small`, `qwen-0.6b`, `gemma-2b`, and `pythia-1.4b`. Commands support CUDA,
 MPS, and CPU through `--device auto`, `cuda`, `mps`, or `cpu`.
 
-RQ2 preprocessing uses Pythia-2.8B to correctness-filter SST, IMDb, and DynaSent; AIT is not
-correctness-filtered. The explicit Pythia-1.4B option above preserves the separate RQ1 benchmark.
+RQ2 preprocessing uses Pythia-2.8B to correctness-filter SST, IMDb, and DynaSent. AIT is not
+correctness-filtered because it is the supervised valence source; CEBaB preserves its human edits
+and defers correctness checks to each target model. The explicit Pythia-1.4B option above preserves
+the separate RQ1 benchmark.
 
 For Colab, use the
 [`RQ1 SST-to-GPT-2 notebook`](notebooks/01_colab_sst_to_gpt2_results.ipynb) or the
@@ -46,7 +48,7 @@ Explore a completed Drive run without writing new artifacts using the
   [implementation details](docs/rq-1/IMPLEMENTATION.md).
 - **RQ2 — valence/sentiment alignment and causal experiments:**
   [overview](docs/rq-2/README.md) and
-  [AIT, SST, IMDb, and DynaSent preprocessing guide](docs/rq-2/PREPROCESSING.md).
+  [AIT, SST, IMDb, DynaSent, and CEBaB preprocessing guide](docs/rq-2/PREPROCESSING.md).
 - **Sentiment-manifold research program:**
   [research questions, methodology, diagnostics, and roadmap](docs/rq-sentiment-manifolds/README.md).
 - **Code organization:** [domain boundaries and dependency rules](docs/ARCHITECTURE.md).

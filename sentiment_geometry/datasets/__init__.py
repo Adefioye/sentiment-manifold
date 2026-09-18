@@ -1,6 +1,7 @@
 from .openwebtext import load_openwebtext
 from .preprocessing import (
     preprocess_ait,
+    preprocess_cebab,
     preprocess_dynasent,
     preprocess_imdb,
     preprocess_sst,
@@ -34,6 +35,7 @@ __all__ = [
     "pair_sst_by_token_length",
     "pair_toy_examples",
     "preprocess_ait",
+    "preprocess_cebab",
     "preprocess_dynasent",
     "preprocess_imdb",
     "preprocess_sst",

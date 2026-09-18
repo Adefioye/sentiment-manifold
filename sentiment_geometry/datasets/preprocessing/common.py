@@ -170,7 +170,12 @@ def annotate_token_lengths(
 
 
 def _score(row: Mapping[str, Any]) -> float | None:
-    for field in ("continuous_score", "sentiment_score", "original_valence_class"):
+    for field in (
+        "continuous_score",
+        "sentiment_score",
+        "original_valence_class",
+        "review_rating",
+    ):
         value = row.get(field)
         if value is not None:
             return float(value)

@@ -10,6 +10,7 @@ from pathlib import Path
 from ..datasets import (
     load_toy_movie_review,
     preprocess_ait,
+    preprocess_cebab,
     preprocess_dynasent,
     preprocess_imdb,
     preprocess_sst,
@@ -410,6 +411,28 @@ def main(argv: list[str] | None = None) -> None:
     _add_pairing_arguments(dynasent)
     _add_publish_arguments(dynasent, "sentiment-manifold-dynasent-r1-r2-pythia-2.8b")
 
+    cebab = subparsers.add_parser(
+        "preprocess-cebab",
+        help="build CEBaB binary datasets and human counterfactual prompt pairs",
+    )
+    cebab.add_argument("--dataset-name", default="CEBaB/CEBaB")
+    cebab.add_argument("--dataset-revision", default=None)
+    cebab.add_argument(
+        "--train-split",
+        choices=["train_inclusive", "train_exclusive", "train_observational"],
+        default="train_inclusive",
+        help="source train variant mapped to the output train split",
+    )
+    cebab.add_argument("--output-dir", default="data/processed/cebab-binary")
+    cebab.add_argument(
+        "--pairing-split",
+        action="append",
+        choices=["train", "validation", "test"],
+        help="split to pair; repeat as needed (default: test)",
+    )
+    _add_pairing_arguments(cebab)
+    _add_publish_arguments(cebab, "sentiment-manifold-cebab-binary")
+
     args = parser.parse_args(argv)
     if args.command == "inspect-data":
         config = _load_with_overrides(args)
@@ -566,6 +589,27 @@ def main(argv: list[str] | None = None) -> None:
             hf_token=hf_token,
         )
         print(f"Saved DynaSent datasets: {result.output_dir}")
+        print(json.dumps(result.metadata["counts"], indent=2, sort_keys=True))
+        if result.hub_repo_id:
+            print(f"Published dataset: https://huggingface.co/datasets/{result.hub_repo_id}")
+    elif args.command == "preprocess-cebab":
+        hf_token = _publish_token_or_error(parser, args)
+        result = preprocess_cebab(
+            output_dir=args.output_dir,
+            dataset_name=args.dataset_name,
+            dataset_revision=args.dataset_revision,
+            train_split=args.train_split,
+            pairing_models=args.pairing_model,
+            pairing_revisions=args.pairing_revision,
+            pairing_splits=args.pairing_split or ("test",),
+            max_pairing_prompt_tokens=args.max_pairing_prompt_tokens,
+            prompt_template=args.prompt_template,
+            push_to_hub=args.push_to_hub,
+            hub_repo_id=args.hub_repo_id,
+            private=not args.public,
+            hf_token=hf_token,
+        )
+        print(f"Saved CEBaB datasets: {result.output_dir}")
         print(json.dumps(result.metadata["counts"], indent=2, sort_keys=True))
         if result.hub_repo_id:
             print(f"Published dataset: https://huggingface.co/datasets/{result.hub_repo_id}")

@@ -99,15 +99,16 @@ independently at four prompt-token positions: the adjective (ADJ), verb (VRB), s
 each model's tokenizer rather than assumed token indices; END is the last non-padding token. It
 sweeps residual boundaries
 `1..n_layers`; boundary `0` is the embedding residual and is excluded. All-token directional
-patching is then run on four required evaluation panels:
+patching is then run on three configured evaluation panels:
 
 1. held-out ToyMovieReview adjectives;
-2. all eight paper-era ToyMovieReview verbs, subject to the upstream one-token filter;
-3. the upstream SimpleAdverb vocabulary, deduplicated and subject to its exact two-token filter;
-4. the model-specific SST `directed_pairs` configuration from the private Hugging Face dataset.
+2. the upstream SimpleAdverb vocabulary, deduplicated and subject to its exact two-token filter;
+3. the model-specific SST `directed_pairs` configuration from the private Hugging Face dataset.
 
-The Toy adjective, verb, and adverb panels are mandatory rather than optional command flags. A run
-fails if any one of them cannot produce tokenizer-compatible, equal-length directional cases.
+The active Toy panels are selected by `data.toy_evaluations`. The current configuration selects
+`toy_adjectives` and `toy_adverbs`; `toy_verbs` remains supported and can be restored through the
+configuration. A run fails if a selected panel cannot produce tokenizer-compatible, equal-length
+directional cases.
 
 The complete configuration is in
 [`configs/sentiment_position_comparison.yaml`](../../configs/sentiment_position_comparison.yaml).

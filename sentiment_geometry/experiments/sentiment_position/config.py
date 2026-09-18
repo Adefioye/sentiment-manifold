@@ -13,12 +13,15 @@ from ...models.config import ModelConfig
 
 SUPPORTED_FITTING_METHODS = ("mean_diff", "logistic_regression", "das")
 SUPPORTED_FITTING_POSITIONS = ("adjective", "verb", "summary", "final")
-REQUIRED_TOY_EVALUATIONS = ("toy_adjectives", "toy_verbs", "toy_adverbs")
+SUPPORTED_TOY_EVALUATIONS = ("toy_adjectives", "toy_verbs", "toy_adverbs")
 
 
 @dataclass
 class EvaluationDataConfig:
     toy_config: str = "data/toy_movie_review.yaml"
+    toy_evaluations: list[str] = field(
+        default_factory=lambda: list(SUPPORTED_TOY_EVALUATIONS)
+    )
     sst_repo_id: str = "kokolamba/sentiment-manifold-sst-pythia-2.8b"
     sst_revision: str | None = None
     sst_split: str = "test"
@@ -98,6 +101,18 @@ class SentimentPositionExperimentConfig:
         if unknown_positions:
             raise ValueError(
                 f"Fitting positions must be {SUPPORTED_FITTING_POSITIONS}; got {unknown_positions}"
+            )
+        if not self.data.toy_evaluations:
+            raise ValueError("At least one Toy evaluation dataset is required")
+        if len(self.data.toy_evaluations) != len(set(self.data.toy_evaluations)):
+            raise ValueError("Toy evaluation datasets must be unique")
+        unknown_toy_evaluations = sorted(
+            set(self.data.toy_evaluations) - set(SUPPORTED_TOY_EVALUATIONS)
+        )
+        if unknown_toy_evaluations:
+            raise ValueError(
+                f"Toy evaluations must be selected from {SUPPORTED_TOY_EVALUATIONS}; "
+                f"got {unknown_toy_evaluations}"
             )
         missing_sst = [
             model.name for model in self.models if model.name not in self.data.sst_configs
@@ -195,9 +210,9 @@ def apply_config_overrides(
 
 
 __all__ = [
-    "REQUIRED_TOY_EVALUATIONS",
     "SUPPORTED_FITTING_METHODS",
     "SUPPORTED_FITTING_POSITIONS",
+    "SUPPORTED_TOY_EVALUATIONS",
     "SentimentPositionExperimentConfig",
     "apply_config_overrides",
     "comparison_boundaries",

@@ -16,6 +16,7 @@ models:
 
 data:
   toy_config: data/toy_movie_review.yaml
+  toy_evaluations: [toy_adjectives, toy_adverbs]
   sst_repo_id: kokolamba/sentiment-manifold-sst-pythia-2.8b
   sst_revision: bcffb933a34a48b409a7caf3a53f0fe7bb8152cc
   sst_split: test

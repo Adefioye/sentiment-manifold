@@ -12,7 +12,7 @@ from ...datasets.toy_movie_review import ToyEvaluationSet, ToyMovieReview
 from ...datasets.types import CounterfactualPair, TextExample
 from ...models import CausalLMAdapter
 from ...models.config import ModelConfig
-from .config import REQUIRED_TOY_EVALUATIONS, SentimentPositionExperimentConfig
+from .config import SentimentPositionExperimentConfig
 
 SST_ANSWERS = {1: (" Positive",), 0: (" Negative",)}
 AnswerSpec = dict[int, tuple[str, ...]]
@@ -71,12 +71,16 @@ class SentimentDatasetLoader:
         if not train_examples or not train_pairs:
             raise RuntimeError(f"No tokenizer-compatible Toy training data for {self.model.name}")
 
-        toy_evaluations = build_toy_evaluation_sets(
+        available_toy_evaluations = build_toy_evaluation_sets(
             raw_toy,
             self.adapter.tokenizer,
             prepend_bos=self.model.prepend_bos,
         )
-        self._validate_required_toy_evaluations(toy_evaluations)
+        toy_evaluations = {
+            name: available_toy_evaluations[name]
+            for name in self.config.data.toy_evaluations
+        }
+        self._validate_selected_toy_evaluations(toy_evaluations)
         sst_config = self.config.data.sst_configs[self.model.name]
         sst_pairs = tuple(
             load_hf_directed_pairs(
@@ -125,18 +129,13 @@ class SentimentDatasetLoader:
         )
 
     @staticmethod
-    def _validate_required_toy_evaluations(
+    def _validate_selected_toy_evaluations(
         evaluations: Mapping[str, ToyEvaluationSet],
     ) -> None:
-        missing = [name for name in REQUIRED_TOY_EVALUATIONS if name not in evaluations]
-        empty = [
-            name
-            for name in REQUIRED_TOY_EVALUATIONS
-            if name in evaluations and not evaluations[name].pairs
-        ]
-        if missing or empty:
+        empty = [name for name, evaluation in evaluations.items() if not evaluation.pairs]
+        if empty:
             raise RuntimeError(
-                f"Required Toy evaluation data is incomplete; missing={missing}, empty={empty}"
+                f"Selected Toy evaluation data has no directional pairs: {empty}"
             )
 
 

@@ -151,6 +151,8 @@ def _lexical_evaluation_rows(
         ("toy_adverbs", "adverb", raw_toy.adverbs),
     )
     for dataset, word_type, words_by_label in sources:
+        if dataset not in evaluations:
+            continue
         retained = {example.metadata["focus_word"] for example in evaluations[dataset].examples}
         for label in (1, 0):
             seen: set[str] = set()

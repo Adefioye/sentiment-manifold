@@ -17,7 +17,7 @@ from sentiment_geometry.experiments import (
 )
 from sentiment_geometry.experiments.sentiment_position import audit_direction_artifacts
 from sentiment_geometry.experiments.sentiment_position.config import (
-    REQUIRED_TOY_EVALUATIONS,
+    SUPPORTED_TOY_EVALUATIONS,
     apply_config_overrides,
     comparison_boundaries,
 )
@@ -90,6 +90,7 @@ def test_config_runs_all_positions_methods_and_non_embedding_layers():
     assert [model.name for model in config.models] == ["gpt2-small", "qwen-0.6b"]
     assert config.sweep.methods == ["mean_diff", "logistic_regression", "das"]
     assert config.sweep.fit_positions == ["adjective", "verb", "summary", "final"]
+    assert config.data.toy_evaluations == ["toy_adjectives", "toy_adverbs"]
     assert config.layers_for(4) == [1, 2, 3, 4]
     with pytest.raises(ValueError, match="boundary 0 is excluded"):
         config.sweep.layers = [0, 1]
@@ -156,10 +157,10 @@ def test_full_run_script_passes_the_complete_experiment_grid_explicitly():
         assert required in script
 
 
-def test_toy_evaluations_always_include_adjectives_verbs_and_adverbs():
+def test_toy_evaluation_builder_exposes_all_supported_panels():
     dataset = load_toy_movie_review(PROJECT_ROOT / "data/toy_movie_review.yaml")
     evaluations = build_toy_evaluation_sets(dataset, _WordLengthTokenizer(), prepend_bos=True)
-    assert tuple(evaluations) == REQUIRED_TOY_EVALUATIONS
+    assert tuple(evaluations) == SUPPORTED_TOY_EVALUATIONS
     assert all(evaluation.pairs for evaluation in evaluations.values())
     assert len(evaluations["toy_verbs"].examples) == 8
     assert len(evaluations["toy_adverbs"].examples) == 40

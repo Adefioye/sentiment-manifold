@@ -202,7 +202,7 @@ def build_toy_evaluation_sets(
     *,
     prepend_bos: bool,
 ) -> dict[str, ToyEvaluationSet]:
-    """Build the required adjective, verb, and SimpleAdverb evaluations.
+    """Build the available adjective, verb, and SimpleAdverb evaluations.
 
     The verb panel uses the eight paper-era ToyMovieReview verbs with a neutral
     adjective so the changing lexical item is the verb.  The adverb panel
@@ -261,12 +261,6 @@ def build_toy_evaluation_sets(
             dataset.adverb_answers,
         ),
     }
-    empty = [name for name, evaluation in result.items() if not evaluation.pairs]
-    if empty:
-        raise RuntimeError(
-            "Tokenizer filtering left no equal-length directional pairs for required "
-            f"Toy evaluation datasets: {empty}"
-        )
     return result
 
 

@@ -17,11 +17,7 @@ from tqdm.auto import tqdm
 from ...activations import extract_activations
 from ...models import CausalLMAdapter, ModelConfig, clear_device_cache, resolve_device
 from ...persistence import RunArtifactStore
-from .config import (
-    REQUIRED_TOY_EVALUATIONS,
-    SentimentPositionExperimentConfig,
-    comparison_boundaries,
-)
+from .config import SentimentPositionExperimentConfig, comparison_boundaries
 from .datasets import PreparedSentimentData, SentimentDatasetLoader
 from .evaluation import DirectionEvaluator
 from .fitting import DirectionFitRequest, DirectionFitService, FittedDirection
@@ -62,7 +58,7 @@ class SentimentPositionExperiment:
                 "models": completed_models,
                 "methods": list(self.config.sweep.methods),
                 "fit_positions": list(self.config.sweep.fit_positions),
-                "required_toy_evaluations": list(REQUIRED_TOY_EVALUATIONS),
+                "toy_evaluations": list(self.config.data.toy_evaluations),
                 "sst_repo_id": self.config.data.sst_repo_id,
                 "sst_revision": self.config.data.sst_revision,
             },
@@ -343,7 +339,7 @@ class SentimentPositionExperiment:
             active_model=asdict(model),
             resolved_layers=layers,
             comparison_boundaries=sorted(snapshots),
-            required_toy_evaluations=list(data.toy_evaluations),
+            resolved_toy_evaluations=list(data.toy_evaluations),
             sst_directed_pair_config=data.sst_config,
             sst_resolved_revision=data.sst_resolved_revision,
             results_run_dir=str(run_dir),

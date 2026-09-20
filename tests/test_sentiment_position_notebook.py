@@ -75,3 +75,8 @@ def test_exploration_notebook_fixes_run_position_order_and_layer_reporting():
     assert 'set(selection["selection_dataset"]) != {"toy_adverbs"}' in source
     assert 'set(selection["selection_metric"]) != {"logit_flip_percent"}' in source
     assert 'mismatched_sst' in source
+    assert 'report.selected_metrics["dataset"] == "sst"' in source
+    assert '"logit_flip_percent": "SST Logit Flip (%)"' in source
+    assert '"sign_flip_percent": "SST Literal Sign Flip (%)"' in source
+    assert 'row[metric_column]' in source
+    assert 'SST is not used to reselect the layer' in source

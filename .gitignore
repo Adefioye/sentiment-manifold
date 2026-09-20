@@ -11,5 +11,8 @@ outputs/**/trial_directions/
 data/processed/
 notebooks/rq2-data-exploration/
 
+# Local-only research instructions.
+.claude/skills/sentiment-research/
+
 # dotenv files
 .env

@@ -20,6 +20,11 @@ from ..datasets.preprocessing.common import (
     DEFAULT_PROMPT_TEMPLATE,
     PAIRING_MODEL_SPECS,
 )
+from ..experiments.ait_valence import (
+    AITValenceExperimentConfig,
+    apply_ait_valence_overrides,
+    run_ait_valence_direction_experiment,
+)
 from ..experiments.reproduction import ReproductionConfig, run_reproduction
 from ..experiments.sentiment_position import (
     SentimentPositionExperimentConfig,
@@ -300,6 +305,41 @@ def main(argv: list[str] | None = None) -> None:
     position_comparison.add_argument("--sst-max-directed-cases", type=int, default=None)
     position_comparison.add_argument("--hf-token-env", default=None)
 
+    ait_valence = subparsers.add_parser(
+        "train-ait-valence",
+        help="fit AIT mean-difference, logistic-regression, and causal DAS directions",
+    )
+    ait_valence.add_argument("--config", default="configs/ait_valence_directions.yaml")
+    ait_valence.add_argument(
+        "--model",
+        action="append",
+        choices=MODEL_CHOICES,
+        help="model to run; repeat as needed (the config runs all models by default)",
+    )
+    ait_valence.add_argument(
+        "--device", choices=["auto", "cuda", "mps", "cpu"], default=None
+    )
+    ait_valence.add_argument(
+        "--dtype", choices=["auto", "float32", "float16", "bfloat16"], default=None
+    )
+    ait_valence.add_argument("--batch-size", type=int, default=None)
+    ait_valence.add_argument("--output-dir", default=None)
+    ait_valence.add_argument("--checkpoint-dir", default=None)
+    ait_valence.add_argument(
+        "--hf-token-env",
+        default=None,
+        help="environment variable containing the private Hugging Face dataset token",
+    )
+    ait_valence.add_argument(
+        "--method",
+        action="append",
+        choices=("mean_diff", "logistic_regression", "das"),
+        help="fitting method; repeat as needed (the config runs all three by default)",
+    )
+    ait_layer_group = ait_valence.add_mutually_exclusive_group()
+    ait_layer_group.add_argument("--all-non-embedding-layers", action="store_true")
+    ait_layer_group.add_argument("--layer", action="append", type=int)
+
     plot_parser = subparsers.add_parser("plot", help="render plots from a completed run")
     plot_parser.add_argument("--run-dir", required=True)
 
@@ -472,6 +512,12 @@ def main(argv: list[str] | None = None) -> None:
         )
         run_dir = run_sentiment_position_comparison(config)
         print(f"Completed sentiment-position comparison: {run_dir}")
+    elif args.command == "train-ait-valence":
+        config = apply_ait_valence_overrides(
+            AITValenceExperimentConfig.load(args.config), args
+        )
+        run_dir = run_ait_valence_direction_experiment(config)
+        print(f"Completed AIT valence-direction experiment: {run_dir}")
     elif args.command == "plot":
         from ..reporting.plots import plot_run
 

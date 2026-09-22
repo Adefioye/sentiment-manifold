@@ -21,6 +21,7 @@ class TokenizedBatch:
     attention_mask: Tensor
     focus_positions: Tensor | None = None
     named_positions: dict[str, Tensor] | None = None
+    special_tokens_mask: Tensor | None = None
 
     def to(self, device: torch.device) -> TokenizedBatch:
         return TokenizedBatch(
@@ -32,6 +33,9 @@ class TokenizedBatch:
             named_positions=None
             if self.named_positions is None
             else {name: positions.to(device) for name, positions in self.named_positions.items()},
+            special_tokens_mask=None
+            if self.special_tokens_mask is None
+            else self.special_tokens_mask.to(device),
         )
 
 
@@ -127,14 +131,26 @@ class CausalLMAdapter:
 
     def tokenize(self, examples: Sequence[TextExample] | Sequence[str]) -> TokenizedBatch:
         texts = [item.text if isinstance(item, TextExample) else item for item in examples]
-        encoded = self.tokenizer(
-            texts,
-            padding=True,
-            return_tensors="pt",
-            add_special_tokens=not self.prepend_bos,
-            return_offsets_mapping=True,
-        )
+        tokenization_kwargs = {
+            "padding": True,
+            "return_tensors": "pt",
+            "add_special_tokens": not self.prepend_bos,
+            "return_offsets_mapping": True,
+        }
+        try:
+            encoded = self.tokenizer(
+                texts,
+                **tokenization_kwargs,
+                return_special_tokens_mask=True,
+            )
+        except TypeError as error:
+            if "return_special_tokens_mask" not in str(error):
+                raise
+            encoded = self.tokenizer(texts, **tokenization_kwargs)
         offsets = encoded.pop("offset_mapping")
+        special_tokens_mask = encoded.pop(
+            "special_tokens_mask", torch.zeros_like(encoded["attention_mask"])
+        )
         if self.prepend_bos:
             bos = torch.full(
                 (encoded["input_ids"].shape[0], 1),
@@ -147,6 +163,9 @@ class CausalLMAdapter:
             )
             offsets = torch.cat(
                 (torch.zeros((offsets.shape[0], 1, 2), dtype=offsets.dtype), offsets), dim=1
+            )
+            special_tokens_mask = torch.cat(
+                (torch.ones_like(bos), special_tokens_mask), dim=1
             )
         focus_positions: Tensor | None = None
         named_positions: dict[str, Tensor] | None = None
@@ -202,6 +221,7 @@ class CausalLMAdapter:
             attention_mask=encoded["attention_mask"],
             focus_positions=focus_positions,
             named_positions=named_positions,
+            special_tokens_mask=special_tokens_mask,
         )
 
     def single_token_id(self, text: str) -> int:

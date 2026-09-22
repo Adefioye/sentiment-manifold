@@ -1,5 +1,13 @@
 """Reusable, domain-named experiment APIs."""
 
+from .ait_valence import (
+    AITDatasetLoader,
+    AITValenceDirectionExperiment,
+    AITValenceExperimentConfig,
+    PreparedAITData,
+    apply_ait_valence_overrides,
+    run_ait_valence_direction_experiment,
+)
 from .reproduction import ReproductionConfig, run_reproduction
 from .sentiment_position import (
     DirectionArtifactAudit,
@@ -16,16 +24,22 @@ from .sentiment_position import (
 )
 
 __all__ = [
+    "AITDatasetLoader",
+    "AITValenceDirectionExperiment",
+    "AITValenceExperimentConfig",
     "DirectionArtifactAudit",
     "FrozenDirectionEvaluationConfig",
     "FrozenDirectionSelection",
     "FrozenEvaluationDataset",
     "FrozenSentimentDirectionEvaluation",
+    "PreparedAITData",
     "ReproductionConfig",
     "SentimentPositionExperiment",
     "SentimentPositionExperimentConfig",
+    "apply_ait_valence_overrides",
     "audit_direction_artifacts",
     "load_frozen_direction_selections",
+    "run_ait_valence_direction_experiment",
     "run_frozen_sentiment_direction_evaluation",
     "run_reproduction",
     "run_sentiment_position_comparison",

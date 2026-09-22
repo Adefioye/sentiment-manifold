@@ -172,3 +172,45 @@ sentiment-geometry plot --run-dir outputs/sentiment-position-comparison/qwen-0.6
 
 The implementation is complete and smoke-tested. The checkmark records implementation completion;
 the full GPU experiment and its scientific interpretation are still pending.
+
+## AIT valence-direction experiment
+
+The AIT workflow has its own configuration at
+[`configs/ait_valence_directions.yaml`](../../configs/ait_valence_directions.yaml) and a public
+`AITValenceDirectionExperiment` API. It loads the pinned private AIT Hub artifact's
+`common_matched_pairs` configuration so all configured models use identical, equal-length prompt
+pairs. The deterministic sample contract is 55 train examples, 30 eval directed cases, and 30 test
+directed cases.
+
+Mean difference and logistic regression fit masked mean-pooled residual activations over all
+non-padding, non-special prompt tokens. One-dimensional DAS retains causal training semantics: it
+uses the directed train pairs and patches all non-padding token positions. At every layer, the DAS
+epoch is selected by eval-set validation loss. The disjoint AIT test role then selects one layer per
+method using `logit_flip_percent`; because it performs selection, it is not treated as an unbiased
+final evaluation set.
+
+```python
+from sentiment_geometry.experiments import (
+    AITValenceDirectionExperiment,
+    AITValenceExperimentConfig,
+)
+
+config = AITValenceExperimentConfig.load("configs/ait_valence_directions.yaml")
+AITValenceDirectionExperiment(config).run()
+```
+
+The equivalent CLI is:
+
+```bash
+sentiment-geometry train-ait-valence --config configs/ait_valence_directions.yaml
+```
+
+Private Hub authentication is read from `HF_TOKEN` by default, or from the file named by
+`HF_TOKEN_PATH`. A different environment-variable name can be declared in the YAML or passed with
+`--hf-token-env`; the credential itself is never written to a config, manifest, CSV, or checkpoint.
+
+The output root contains immutable sample/pair manifests, a dataset summary, requested and resolved
+configuration, combined CSVs, and an experiment manifest. Each model directory contains resumable
+direction checkpoints plus `metrics.csv`, `patching_records.csv`, `direction_metadata.csv`,
+`das_epoch_metrics.csv`, `layer_selection.csv`, and `selected_metrics.csv`. A future Colab notebook
+should only set runtime paths and credentials, invoke this API, and display the saved tables.

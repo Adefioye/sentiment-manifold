@@ -22,6 +22,9 @@ sentiment-geometry plot --run-dir outputs/results/gpt2-small
 
 # Both models, all methods/positions/layers, and all required evaluations
 ./scripts/run_sentiment_position_comparison.sh
+
+# AIT valence directions with deterministic train/eval/test roles
+sentiment-geometry train-ait-valence --config configs/ait_valence_directions.yaml
 ```
 
 Model aliases are `gpt2-small`, `qwen-0.6b`, `gemma-2b`, and `pythia-1.4b`. Commands support CUDA,

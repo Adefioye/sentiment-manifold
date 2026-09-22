@@ -1,3 +1,4 @@
+from .huggingface import HuggingFaceRows, load_hf_parquet_rows
 from .openwebtext import load_openwebtext
 from .preprocessing import (
     preprocess_ait,
@@ -23,11 +24,13 @@ from .types import CounterfactualPair, TextExample
 
 __all__ = [
     "CounterfactualPair",
+    "HuggingFaceRows",
     "TextExample",
     "ToyEvaluationSet",
     "ToyMovieReview",
     "build_toy_evaluation_sets",
     "load_hf_directed_pairs",
+    "load_hf_parquet_rows",
     "load_openwebtext",
     "load_processed_sst_candidates",
     "load_sst",

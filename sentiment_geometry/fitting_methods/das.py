@@ -121,10 +121,14 @@ class DASFitter:
             with torch.no_grad():
                 clean_hidden = adapter.boundary_activations(clean, layer)
                 corrupted_hidden = adapter.boundary_activations(corrupted, layer)
-                clean_positions = adapter.activation_positions(clean, position)
-                corrupted_positions = adapter.activation_positions(corrupted, position)
-                clean_rows = clean_hidden[rows, clean_positions].detach()
-                corrupted_rows = corrupted_hidden[rows, corrupted_positions].detach()
+                if position == "all":
+                    clean_rows = clean_hidden.detach()
+                    corrupted_rows = corrupted_hidden.detach()
+                else:
+                    clean_positions = adapter.activation_positions(clean, position)
+                    corrupted_positions = adapter.activation_positions(corrupted, position)
+                    clean_rows = clean_hidden[rows, clean_positions].detach()
+                    corrupted_rows = corrupted_hidden[rows, corrupted_positions].detach()
                 clean_output = adapter.model(
                     input_ids=clean.input_ids,
                     attention_mask=clean.attention_mask,
@@ -151,10 +155,18 @@ class DASFitter:
                     target_labels=labels,
                 )
             )
-            activation_rows.append(corrupted_rows.float().cpu())
-            activation_labels.append(
-                torch.tensor([pair.corrupted.label for pair in selected], dtype=torch.long)
+            pair_labels = torch.tensor(
+                [pair.corrupted.label for pair in selected], dtype=torch.long
             )
+            if position == "all":
+                valid = corrupted.attention_mask.bool()
+                activation_rows.append(corrupted_rows[valid].float().cpu())
+                activation_labels.append(
+                    pair_labels.unsqueeze(1).expand_as(valid.cpu())[valid.cpu()]
+                )
+            else:
+                activation_rows.append(corrupted_rows.float().cpu())
+                activation_labels.append(pair_labels)
         return (
             prepared,
             float(torch.cat(clean_margins).mean()),
@@ -176,13 +188,18 @@ class DASFitter:
 
         def editor(hidden: Tensor) -> Tensor:
             edited = hidden.clone()
-            rows = torch.arange(len(batch.target_labels), device=hidden.device)
-            positions = adapter.activation_positions(corrupted, self._position)
-            edited[rows, positions] = directional_replace(
+            replacement = directional_replace(
                 batch.corrupted_rows.to(hidden.dtype),
                 batch.clean_rows.to(hidden.dtype),
                 basis,
             )
+            if self._position == "all":
+                mask = corrupted.attention_mask.bool().unsqueeze(-1)
+                edited = torch.where(mask, replacement, edited)
+            else:
+                rows = torch.arange(len(batch.target_labels), device=hidden.device)
+                positions = adapter.activation_positions(corrupted, self._position)
+                edited[rows, positions] = replacement
             return edited
 
         with adapter.edit_boundary(layer=self._layer, editor=editor):

@@ -260,3 +260,102 @@ def test_frozen_selection_rejects_parent_sst_layer_mismatch(tmp_path):
         assert "parent SST result does not use the frozen layer" in str(error)
     else:
         raise AssertionError("Expected a parent SST layer mismatch to be rejected")
+
+
+def test_frozen_evaluation_reuses_completed_model_rows(monkeypatch, tmp_path):
+    source, _ = _source_run(tmp_path)
+    output_root = tmp_path / "results"
+    completed_root = output_root / "gpt2-small"
+    completed_root.mkdir(parents=True)
+    completed_metrics = [
+        {
+            "model": "gpt2-small",
+            "method": "mean_diff",
+            "fit_position": "final",
+            "dataset": "sst",
+            "logit_flip_percent": 60.0,
+        }
+    ]
+    completed_selections = [
+        {
+            "model": "gpt2-small",
+            "method": "mean_diff",
+            "fit_position": "final",
+            "selection_dataset": "toy_adverbs",
+            "selection_metric": "logit_flip_percent",
+        }
+    ]
+    completed_summaries = [
+        {"model": "gpt2-small", "dataset": "sst", "n_directed_cases": 1}
+    ]
+    pd.DataFrame(completed_metrics).to_csv(completed_root / "metrics.csv", index=False)
+    pd.DataFrame(completed_selections).to_csv(
+        completed_root / "layer_selection.csv", index=False
+    )
+    pd.DataFrame(completed_summaries).to_csv(
+        completed_root / "dataset_summary.csv", index=False
+    )
+
+    config = FrozenDirectionEvaluationConfig(
+        source_run_root=str(source),
+        output_dir=str(output_root),
+        models=[
+            ModelConfig(
+                name="qwen-0.6b",
+                revision="model-commit",
+                device="cpu",
+                dtype="float32",
+                batch_size=8,
+            )
+        ],
+        datasets=[
+            FrozenEvaluationDataset(
+                name="sst",
+                repo_id="owner/private-sst",
+                revision="dataset-commit",
+                configs={"qwen-0.6b": "tigges_qwen_0_6b_directed_pairs"},
+            )
+        ],
+        methods=["mean_diff"],
+        fit_position="final",
+        selection_dataset="toy_adverbs",
+        selection_metric="logit_flip_percent",
+        reuse_completed_models=["gpt2-small"],
+    )
+    qwen_metrics = [
+        {
+            "model": "qwen-0.6b",
+            "method": "mean_diff",
+            "fit_position": "final",
+            "dataset": "sst",
+            "logit_flip_percent": 55.0,
+        }
+    ]
+    qwen_selections = [
+        {
+            "model": "qwen-0.6b",
+            "method": "mean_diff",
+            "fit_position": "final",
+            "selection_dataset": "toy_adverbs",
+            "selection_metric": "logit_flip_percent",
+        }
+    ]
+    qwen_summaries = [
+        {"model": "qwen-0.6b", "dataset": "sst", "n_directed_cases": 1}
+    ]
+    monkeypatch.setattr(
+        FrozenSentimentDirectionEvaluation,
+        "_run_model",
+        lambda self, model, root: (qwen_metrics, qwen_selections, qwen_summaries),
+    )
+
+    FrozenSentimentDirectionEvaluation(config).run()
+
+    combined = pd.read_csv(output_root / "all_models_metrics.csv")
+    assert combined["model"].tolist() == ["gpt2-small", "qwen-0.6b"]
+    manifest = json.loads(
+        (output_root / "evaluation_manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["models"] == ["gpt2-small", "qwen-0.6b"]
+    assert manifest["evaluated_models"] == ["qwen-0.6b"]
+    assert manifest["reused_completed_models"] == ["gpt2-small"]

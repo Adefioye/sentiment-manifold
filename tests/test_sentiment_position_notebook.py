@@ -1,7 +1,6 @@
 import json
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(__file__).parents[1]
 NOTEBOOK_PATH = PROJECT_ROOT / "notebooks/03_colab_sentiment_position_comparison.ipynb"
 EXPLORATION_NOTEBOOK_PATH = (
@@ -116,11 +115,34 @@ def test_frozen_ood_notebook_preserves_selection_and_output_contracts():
     assert "sentiment-manifold-sst-pythia-2.8b" in source
     assert "sentiment-manifold-imdb-pythia-2.8b" in source
     assert "sentiment-manifold-dynasent-r1-r2-pythia-2.8b" in source
+    assert 'RESUME_RUN_ID = "2026-09-22_00-18_CDT"' in source
+    assert 'EVALUATION_MODEL_NAMES = ["qwen-0.6b"]' in source
+    assert 'REUSE_COMPLETED_MODEL_NAMES = ["gpt2-small"]' in source
+    assert '"qwen-0.6b": 8' in source
+    assert "model.batch_size = MODEL_BATCH_SIZES[model.name]" in source
+    assert "models=evaluation_models" in source
+    assert "reuse_completed_models=REUSE_COMPLETED_MODEL_NAMES" in source
     assert 'os.environ[config.hf_token_env] = get_runtime_secret("HF_TOKEN")' in source
     assert 'os.environ.pop(config.hf_token_env, None)' in source
     assert 'delete_runtime_secret("HF_TOKEN")' in source
+    assert "reset_sessions()" in source
+    assert "clear_hf_credentials(config.hf_token_env)" in source
+    assert "assert config.hf_token_env not in os.environ" in source
+    assert 'assert "HF_TOKEN" not in _RUNTIME_SECRETS' in source
+    assert 'assert "_token" not in globals()' in source
     assert "run_frozen_sentiment_direction_evaluation(config)" in source
     assert "best_layer_table" in source
-    assert '"logit_flip_percent": "Logit Flip (%)"' in source
-    assert '"sign_flip_percent": "Literal Sign Flip (%)"' in source
+    assert '"logit_flip_percent": "Logit Flip Percent"' in source
+    assert '"sign_flip_percent": "Literal Sign Flip Percent"' in source
+    metric_table_cell = next(
+        cell
+        for cell in _frozen_ood_notebook()["cells"]
+        if cell.get("id") == "display-metric-tables"
+    )
+    metric_table_source = "".join(metric_table_cell["source"])
+    assert "for model_name in ALL_MODEL_NAMES" in metric_table_source
+    assert "for metric_column, metric_title in TABLE_METRICS.items()" in metric_table_source
+    assert 'values="metric_value"' in metric_table_source
+    assert 'table.style.format("{:.1f}")' in metric_table_source
+    assert "layer_and_score" not in metric_table_source
     assert 'RUN_LAYOUT.update_manifest(\n    status="completed"' in source

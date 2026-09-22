@@ -18,7 +18,7 @@ from ...fitting_methods import DirectionArtifact
 from ...models import CausalLMAdapter, ModelConfig, clear_device_cache, resolve_device
 from ...persistence import RunArtifactStore
 from .config import SUPPORTED_FITTING_METHODS, SUPPORTED_FITTING_POSITIONS
-from .datasets import CausalEvaluation, SST_ANSWERS
+from .datasets import SST_ANSWERS, CausalEvaluation
 from .evaluation import DirectionEvaluator
 from .fitting import FittedDirection
 
@@ -65,6 +65,7 @@ class FrozenDirectionEvaluationConfig:
     selection_dataset: str = "toy_adverbs"
     selection_metric: str = "logit_flip_percent"
     hf_token_env: str = "HF_TOKEN"
+    reuse_completed_models: list[str] = field(default_factory=list)
 
     def validate(self) -> None:
         source_root = Path(self.source_run_root)
@@ -83,6 +84,13 @@ class FrozenDirectionEvaluationConfig:
         model_names = [model.name for model in self.models]
         if len(model_names) != len(set(model_names)):
             raise ValueError("Configured model names must be unique")
+        if len(self.reuse_completed_models) != len(set(self.reuse_completed_models)):
+            raise ValueError("Reused completed model names must be unique")
+        overlap = sorted(set(model_names) & set(self.reuse_completed_models))
+        if overlap:
+            raise ValueError(
+                f"Models cannot be both evaluated and reused as completed: {overlap}"
+            )
         if not self.datasets:
             raise ValueError("At least one evaluation dataset is required")
         dataset_names = [dataset.name for dataset in self.datasets]
@@ -115,6 +123,7 @@ class FrozenDirectionEvaluationConfig:
             "selection_dataset": self.selection_dataset,
             "selection_metric": self.selection_metric,
             "hf_token_env": self.hf_token_env,
+            "reuse_completed_models": list(self.reuse_completed_models),
         }
 
 
@@ -343,6 +352,13 @@ class FrozenSentimentDirectionEvaluation:
         all_metrics: list[dict[str, Any]] = []
         all_selections: list[dict[str, Any]] = []
         all_summaries: list[dict[str, Any]] = []
+        for model_name in self.config.reuse_completed_models:
+            metrics, selections, summaries = self._load_completed_model(
+                model_name, output_root
+            )
+            all_metrics.extend(metrics)
+            all_selections.extend(selections)
+            all_summaries.extend(summaries)
         for model in self.config.models:
             metrics, selections, summaries = self._run_model(model, output_root)
             all_metrics.extend(metrics)
@@ -362,11 +378,83 @@ class FrozenSentimentDirectionEvaluation:
                 "selection_metric": self.config.selection_metric,
                 "fit_position": self.config.fit_position,
                 "methods": list(self.config.methods),
-                "models": [model.name for model in self.config.models],
+                "models": [
+                    *self.config.reuse_completed_models,
+                    *(model.name for model in self.config.models),
+                ],
+                "evaluated_models": [model.name for model in self.config.models],
+                "reused_completed_models": list(self.config.reuse_completed_models),
                 "datasets": [dataset.name for dataset in self.config.datasets],
             },
         )
         return output_root
+
+    def _load_completed_model(
+        self,
+        model_name: str,
+        output_root: Path,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+        model_root = output_root / model_name
+        metrics = _read_csv(
+            model_root / "metrics.csv",
+            required_columns={"model", "method", "fit_position", "dataset"},
+        )
+        selections = _read_csv(
+            model_root / "layer_selection.csv",
+            required_columns={
+                "model",
+                "method",
+                "fit_position",
+                "selection_dataset",
+                "selection_metric",
+            },
+        )
+        summaries = _read_csv(
+            model_root / "dataset_summary.csv",
+            required_columns={"model", "dataset"},
+        )
+        for table_name, table in (
+            ("metrics", metrics),
+            ("layer selection", selections),
+            ("dataset summary", summaries),
+        ):
+            if set(table["model"]) != {model_name}:
+                raise RuntimeError(
+                    f"Reused {table_name} rows do not belong exclusively to {model_name!r}"
+                )
+        expected_methods = set(self.config.methods)
+        expected_datasets = {dataset.name for dataset in self.config.datasets}
+        if set(metrics["method"]) != expected_methods:
+            raise RuntimeError(f"Reused metrics are incomplete for {model_name!r}")
+        if set(metrics["fit_position"]) != {self.config.fit_position}:
+            raise RuntimeError(f"Reused metrics have the wrong fit position for {model_name!r}")
+        if set(metrics["dataset"]) != expected_datasets:
+            raise RuntimeError(f"Reused metrics have the wrong datasets for {model_name!r}")
+        if len(metrics) != len(expected_methods) * len(expected_datasets):
+            raise RuntimeError(f"Reused metrics have duplicate or missing cells for {model_name!r}")
+        if len(selections) != len(expected_methods) or set(selections["method"]) != expected_methods:
+            raise RuntimeError(f"Reused layer selections are incomplete for {model_name!r}")
+        if set(selections["fit_position"]) != {self.config.fit_position}:
+            raise RuntimeError(
+                f"Reused layer selections have the wrong fit position for {model_name!r}"
+            )
+        if set(selections["selection_dataset"]) != {self.config.selection_dataset}:
+            raise RuntimeError(
+                f"Reused layer selections have the wrong selection dataset for {model_name!r}"
+            )
+        if set(selections["selection_metric"]) != {self.config.selection_metric}:
+            raise RuntimeError(
+                f"Reused layer selections have the wrong selection metric for {model_name!r}"
+            )
+        if set(summaries["dataset"]) != expected_datasets or len(summaries) != len(
+            expected_datasets
+        ):
+            raise RuntimeError(f"Reused dataset summaries are incomplete for {model_name!r}")
+        return (
+            metrics.to_dict("records"),
+            selections.to_dict("records"),
+            summaries.to_dict("records"),
+        )
 
     def _run_model(
         self,

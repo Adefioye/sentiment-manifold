@@ -4,6 +4,26 @@ This file records sentiment-manifold experiments in reverse chronological order.
 the date, purpose, protocol, status, and primary outputs so that later experiments can follow the
 same structure.
 
+## 2026-09-22 — Frozen END-direction OOD evaluation
+
+**Status:** GPT-2 Small evaluation complete; Qwen3-0.6B Base resume configured at batch size 8
+after an out-of-memory interruption.
+
+**Description:** Evaluate whether the previously selected END-position sentiment directions transfer
+to SST, IMDb, DynaSent R1, and DynaSent R2 for GPT-2 Small and Qwen3-0.6B Base.
+
+**Protocol:** Reuse the mean-difference, logistic-regression, and one-dimensional DAS directions and
+layers selected on ToyMovieReview ADVERB by `logit_flip_percent` in parent run
+`2026-09-18_20-22_CDT`; do not refit directions or reselect layers on the OOD datasets. The resumed
+run evaluates only Qwen and preserves the completed GPT-2 files. Report separate numeric-only tables
+for `logit_flip_percent` and `sign_flip_percent` for both models.
+
+**Primary entry point:** `notebooks/05_colab_evaluate_frozen_end_directions.ipynb`
+
+**Outputs:** Model-level and combined metrics, layer-selection records, dataset summaries, per-case
+patching records, resolved configurations, and manifests under Google Drive run
+`end-position-ood-evaluation/runs/2026-09-22_00-18_CDT`.
+
 ## 2026-09-19 — Sentiment position comparison
 
 **Status:** Implementation and automated validation complete; full GPU sweep pending.

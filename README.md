@@ -39,6 +39,8 @@ The complete two-model sentiment-position experiment is available in the
 [`sentiment-position comparison notebook`](notebooks/03_colab_sentiment_position_comparison.ipynb).
 Explore a completed Drive run without writing new artifacts using the
 [`sentiment-position results notebook`](notebooks/04_colab_explore_sentiment_position_results.ipynb).
+Reuse its frozen END-position, ADVERB-selected directions on SST, IMDb, and DynaSent with the
+[`frozen OOD evaluation notebook`](notebooks/05_colab_evaluate_frozen_end_directions.ipynb).
 
 ## Documentation
 

@@ -7,6 +7,9 @@ NOTEBOOK_PATH = PROJECT_ROOT / "notebooks/03_colab_sentiment_position_comparison
 EXPLORATION_NOTEBOOK_PATH = (
     PROJECT_ROOT / "notebooks/04_colab_explore_sentiment_position_results.ipynb"
 )
+FROZEN_OOD_NOTEBOOK_PATH = (
+    PROJECT_ROOT / "notebooks/05_colab_evaluate_frozen_end_directions.ipynb"
+)
 
 
 def _notebook():
@@ -15,6 +18,10 @@ def _notebook():
 
 def _exploration_notebook():
     return json.loads(EXPLORATION_NOTEBOOK_PATH.read_text(encoding="utf-8"))
+
+
+def _frozen_ood_notebook():
+    return json.loads(FROZEN_OOD_NOTEBOOK_PATH.read_text(encoding="utf-8"))
 
 
 def test_sentiment_position_notebook_is_valid_and_code_cells_compile():
@@ -80,3 +87,40 @@ def test_exploration_notebook_fixes_run_position_order_and_layer_reporting():
     assert '"sign_flip_percent": "SST Literal Sign Flip (%)"' in source
     assert 'row[metric_column]' in source
     assert 'SST is not used to reselect the layer' in source
+
+
+def test_frozen_ood_notebook_is_valid_and_code_cells_compile():
+    notebook = _frozen_ood_notebook()
+    assert notebook["nbformat"] == 4
+    for index, cell in enumerate(notebook["cells"]):
+        if cell["cell_type"] == "code":
+            compile(
+                "".join(cell["source"]),
+                f"{FROZEN_OOD_NOTEBOOK_PATH.name}:cell-{index}",
+                "exec",
+            )
+
+
+def test_frozen_ood_notebook_preserves_selection_and_output_contracts():
+    source = "\n".join(
+        "".join(cell["source"]) for cell in _frozen_ood_notebook()["cells"]
+    )
+
+    assert 'SOURCE_RUN_ID = "2026-09-18_20-22_CDT"' in source
+    assert 'experiment_name="end-position-ood-evaluation"' in source
+    assert 'fit_position="final"' in source
+    assert 'selection_dataset="toy_adverbs"' in source
+    assert 'selection_metric="logit_flip_percent"' in source
+    assert 'METHOD_ORDER = ["mean_diff", "logistic_regression", "das"]' in source
+    assert 'DATASET_ORDER = ["sst", "imdb", "dynasent_r1", "dynasent_r2"]' in source
+    assert "sentiment-manifold-sst-pythia-2.8b" in source
+    assert "sentiment-manifold-imdb-pythia-2.8b" in source
+    assert "sentiment-manifold-dynasent-r1-r2-pythia-2.8b" in source
+    assert 'os.environ[config.hf_token_env] = get_runtime_secret("HF_TOKEN")' in source
+    assert 'os.environ.pop(config.hf_token_env, None)' in source
+    assert 'delete_runtime_secret("HF_TOKEN")' in source
+    assert "run_frozen_sentiment_direction_evaluation(config)" in source
+    assert "best_layer_table" in source
+    assert '"logit_flip_percent": "Logit Flip (%)"' in source
+    assert '"sign_flip_percent": "Literal Sign Flip (%)"' in source
+    assert 'RUN_LAYOUT.update_manifest(\n    status="completed"' in source

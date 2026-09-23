@@ -4,9 +4,13 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 import torch
 
-from sentiment_geometry.activations import extract_mean_pooled_activations
+from sentiment_geometry.activations import (
+    extract_last_token_activations,
+    extract_mean_pooled_activations,
+)
 from sentiment_geometry.datasets import HuggingFaceRows
 from sentiment_geometry.datasets.types import CounterfactualPair, TextExample
 from sentiment_geometry.evaluation import PatchingResult
@@ -26,6 +30,7 @@ from sentiment_geometry.experiments.ait_valence.fitting import (
     FittedAITDirection,
 )
 from sentiment_geometry.fitting_methods import DirectionArtifact
+from sentiment_geometry.fitting_methods.base import FitResult
 from sentiment_geometry.fitting_methods.das import DASFitter, DASTrainingConfig
 from sentiment_geometry.models import ModelConfig, TokenizedBatch
 from sentiment_geometry.models.devices import DeviceSpec
@@ -81,6 +86,7 @@ def test_ait_config_loads_separate_reproducible_contract():
     assert config.data.matched_config == "common_matched_pairs"
     assert config.data.revision == "c53df7c117c2f433df904cfaeddb9062027f755f"
     assert config.sweep.methods == ["mean_diff", "logistic_regression", "das"]
+    assert config.sweep.activation_representation == "mean_pool"
     assert config.selection.das_checkpoint_split == "eval"
     assert config.selection.layer_selection_split == "test"
 
@@ -166,6 +172,61 @@ def test_mean_pooling_excludes_padding_and_special_tokens():
     np.testing.assert_allclose(pooled, np.asarray([[2.0, 4.0], [7.0, 9.0]]))
 
 
+def test_last_token_extraction_uses_each_prompt_final_non_padding_position():
+    examples = [
+        TextExample(text="one", label=1, example_id="one"),
+        TextExample(text="two", label=0, example_id="two"),
+    ]
+
+    class FakeAdapter:
+        device_spec = DeviceSpec(torch.device("cpu"), torch.float32)
+
+        def tokenize(self, selected):
+            assert len(selected) == 2
+            return TokenizedBatch(
+                input_ids=torch.tensor([[1, 2, 3], [4, 5, 0]]),
+                attention_mask=torch.tensor([[1, 1, 1], [1, 1, 0]]),
+            )
+
+        def boundary_activations(self, batch, layer):
+            assert layer == 1
+            return torch.tensor(
+                [
+                    [[1.0, 10.0], [2.0, 20.0], [3.0, 30.0]],
+                    [[4.0, 40.0], [5.0, 50.0], [0.0, 0.0]],
+                ]
+            )
+
+        @staticmethod
+        def activation_positions(batch, position):
+            assert position == "final"
+            return batch.attention_mask.sum(dim=1).long() - 1
+
+    extracted = extract_last_token_activations(
+        FakeAdapter(), examples, 1, batch_size=2
+    )
+
+    np.testing.assert_allclose(extracted, np.asarray([[3.0, 30.0], [5.0, 50.0]]))
+
+
+def test_last_token_das_trains_at_final_but_selects_checkpoint_on_all_tokens():
+    request = AITDirectionFitRequest(
+        examples=(),
+        train_pairs=(),
+        eval_pairs=(),
+        activations=np.empty((0, 2)),
+        labels=np.empty((0,)),
+        method="das",
+        layer=1,
+        answers={1: (" Positive",), 0: (" Negative",)},
+        activation_representation="last_token",
+    )
+
+    assert request.fit_position == "final"
+    assert request.intervention_position == "final"
+    assert request.checkpoint_validation_position == "all"
+
+
 def test_linear_ait_direction_uses_portable_direction_artifact(tmp_path):
     config = _small_config(tmp_path)
     examples = tuple(
@@ -211,6 +272,93 @@ def test_linear_ait_direction_uses_portable_direction_artifact(tmp_path):
     with np.load(fitted.checkpoint_path, allow_pickle=False) as saved:
         header = json.loads(str(saved["metadata"]))
     assert header["metadata"]["model_revision"] == "model-commit"
+
+
+def test_ait_das_trains_at_last_token_but_validates_on_all_tokens(
+    monkeypatch, tmp_path
+):
+    config = _small_config(tmp_path)
+    config.sweep.activation_representation = "last_token"
+    positive = TextExample(text="positive", label=1, example_id="positive")
+    negative = TextExample(text="negative", label=0, example_id="negative")
+    pair = CounterfactualPair(clean=positive, corrupted=negative)
+    observed = {}
+
+    class FakeAdapter:
+        hidden_size = 2
+
+    class FakeValidationEvaluator:
+        def __init__(self, adapter, pairs, *, position, **kwargs):
+            observed["validation_position"] = position
+
+        @staticmethod
+        def evaluate(direction):
+            return PatchingResult(
+                recovery=0.5,
+                flip_rate=0.5,
+                sign_flip_rate=0.5,
+                corrupted_margin=-1.0,
+                clean_margin=1.0,
+                patched_margin=0.0,
+                corrupted_accuracy=0.0,
+                clean_accuracy=1.0,
+                patched_accuracy=0.5,
+                n_pairs=1,
+                records=(),
+            )
+
+    class FakeDASFitter:
+        def __init__(self, training_config):
+            pass
+
+        @staticmethod
+        def fit(adapter, pairs, *, position, epoch_validator, **kwargs):
+            observed["training_position"] = position
+            validation = epoch_validator(np.asarray([1.0, 0.0]))
+            observed["validation_loss"] = validation["validation_loss"]
+            return FitResult(
+                method="das",
+                direction=np.asarray([1.0, 0.0]),
+                diagnostics={"selected_epoch": 0, "loss_history": []},
+            )
+
+    monkeypatch.setattr(
+        "sentiment_geometry.experiments.ait_valence.fitting."
+        "DirectionalPatchingEvaluator",
+        FakeValidationEvaluator,
+    )
+    monkeypatch.setattr(
+        "sentiment_geometry.experiments.ait_valence.fitting.DASFitter",
+        FakeDASFitter,
+    )
+    service = AITDirectionFitService(
+        config=config,
+        adapter=FakeAdapter(),
+        model=config.models[0],
+        runtime={
+            "resolved_model_revision": "model-commit",
+            "resolved_tokenizer_revision": "tokenizer-commit",
+        },
+    )
+    service.fit(
+        AITDirectionFitRequest(
+            examples=(positive, negative),
+            train_pairs=(pair,),
+            eval_pairs=(pair,),
+            activations=np.asarray([[1.0, 0.0], [-1.0, 0.0]]),
+            labels=np.asarray([1, 0]),
+            method="das",
+            layer=1,
+            answers=config.data.answers,
+            activation_representation="last_token",
+        )
+    )
+
+    assert observed == {
+        "validation_position": "all",
+        "training_position": "final",
+        "validation_loss": 0.5,
+    }
 
 
 def test_das_supports_all_non_padding_token_interventions():
@@ -292,9 +440,27 @@ def test_das_supports_all_non_padding_token_interventions():
     assert result.diagnostics["selected_epoch"] in {0, 1}
 
 
-def test_ait_experiment_smoke_writes_and_selects_all_three_methods(monkeypatch, tmp_path):
+@pytest.mark.parametrize(
+    (
+        "activation_representation",
+        "linear_patch_position",
+        "expected_representations",
+    ),
+    [
+        ("mean_pool", "all", {"masked_mean", "all_tokens"}),
+        ("last_token", "final", {"last_token"}),
+    ],
+)
+def test_ait_experiment_smoke_writes_and_selects_all_three_methods(
+    monkeypatch,
+    tmp_path,
+    activation_representation,
+    linear_patch_position,
+    expected_representations,
+):
     config = _small_config(tmp_path)
     config.sweep.layers = [1, 2]
+    config.sweep.activation_representation = activation_representation
     rows = {
         "train": _matched_rows("train", 8),
         "validation": _matched_rows("validation", 5),
@@ -317,16 +483,31 @@ def test_ait_experiment_smoke_writes_and_selects_all_three_methods(monkeypatch, 
                 "resolved_tokenizer_revision": "tokenizer-commit",
             }
 
+    extraction_calls = []
+
+    def fake_extract(representation, examples, layer):
+        extraction_calls.append((representation, layer))
+        return np.asarray(
+            [[float(row.label), float(layer)] for row in examples]
+        )
+
     monkeypatch.setattr(
         "sentiment_geometry.experiments.ait_valence.experiment."
         "extract_mean_pooled_activations",
-        lambda adapter, examples, layer, **kwargs: np.asarray(
-            [[float(row.label), float(layer)] for row in examples]
+        lambda adapter, examples, layer, **kwargs: fake_extract(
+            "mean_pool", examples, layer
+        ),
+    )
+    monkeypatch.setattr(
+        "sentiment_geometry.experiments.ait_valence.experiment."
+        "extract_last_token_activations",
+        lambda adapter, examples, layer, **kwargs: fake_extract(
+            "last_token", examples, layer
         ),
     )
 
     def fake_fit(self, request):
-        representation = "all_tokens" if request.method == "das" else "masked_mean"
+        representation = request.representation
         path = (
             Path(self.config.sweep.checkpoint_dir)
             / self.model.name
@@ -338,8 +519,15 @@ def test_ait_experiment_smoke_writes_and_selects_all_three_methods(monkeypatch, 
             model_name=self.model.hub_name,
             layer=request.layer,
             vector=np.asarray([1.0, 0.0]),
-            metadata={
-                "representation": representation,
+                metadata={
+                    "representation": representation,
+                    "fit_position": request.fit_position,
+                "activation_representation": request.activation_representation,
+                "intervention_position": request.intervention_position,
+                "training_intervention_position": request.intervention_position,
+                "checkpoint_validation_position": (
+                    request.checkpoint_validation_position
+                ),
                 "selected_epoch": 1 if request.method == "das" else None,
                 "loss_history": [
                     {
@@ -357,8 +545,12 @@ def test_ait_experiment_smoke_writes_and_selects_all_three_methods(monkeypatch, 
 
     monkeypatch.setattr(AITDirectionFitService, "fit", fake_fit)
 
+    evaluator_positions = []
+
     class FakeEvaluator:
         def __init__(self, adapter, pairs, *, layer, **kwargs):
+            self.position = kwargs["position"]
+            evaluator_positions.append((layer, self.position))
             self.layer = layer
             self.pairs = pairs
 
@@ -403,6 +595,28 @@ def test_ait_experiment_smoke_writes_and_selects_all_three_methods(monkeypatch, 
     manifest = json.loads((output / "experiment_manifest.json").read_text())
     assert len(metrics) == 6
     assert len(combined) == 6
+    assert set(metrics["representation"]) == expected_representations
+    assert set(metrics.loc[metrics["method"] == "das", "patch_position"]) == {"all"}
+    assert set(metrics.loc[metrics["method"] != "das", "patch_position"]) == {
+        linear_patch_position
+    }
+    assert set(metrics["activation_representation"]) == {
+        activation_representation
+    }
+    expected_fit_positions = (
+        {"final"} if activation_representation == "last_token" else expected_representations
+    )
+    assert set(metrics["fit_position"]) == expected_fit_positions
+    assert extraction_calls == [
+        (activation_representation, 1),
+        (activation_representation, 2),
+    ]
+    expected_evaluator_positions = (
+        [(1, "all"), (2, "all")]
+        if linear_patch_position == "all"
+        else [(1, "final"), (1, "all"), (2, "final"), (2, "all")]
+    )
+    assert evaluator_positions == expected_evaluator_positions
     assert set(selection["method"]) == {"mean_diff", "logistic_regression", "das"}
     assert set(selection["selected_layer"]) == {2}
     assert not selection["selection_is_final_evaluation"].any()

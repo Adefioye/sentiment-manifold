@@ -31,10 +31,33 @@ class AITDirectionFitRequest:
     method: str
     layer: int
     answers: AnswerSpec
+    activation_representation: str = "mean_pool"
 
     @property
     def representation(self) -> str:
+        if self.activation_representation == "last_token":
+            return "last_token"
+        if self.activation_representation != "mean_pool":
+            raise ValueError(
+                "activation_representation must be 'mean_pool' or 'last_token'"
+            )
         return "all_tokens" if self.method == "das" else "masked_mean"
+
+    @property
+    def intervention_position(self) -> str:
+        return "final" if self.activation_representation == "last_token" else "all"
+
+    @property
+    def checkpoint_validation_position(self) -> str:
+        """Match sentiment-position DAS selection with all-token validation."""
+
+        return "all"
+
+    @property
+    def fit_position(self) -> str:
+        """Use the sentiment experiment's `final` name for END-token directions."""
+
+        return "final" if self.activation_representation == "last_token" else self.representation
 
 
 @dataclass(frozen=True)
@@ -58,10 +81,18 @@ class AITDirectionFitService:
         self.adapter = adapter
         self.model = model
         self.runtime = runtime
-        self._validation_layer: int | None = None
+        self._validation_key: tuple[int, str, tuple[str, ...]] | None = None
         self._validation_evaluator: DirectionalPatchingEvaluator | None = None
 
     def fit(self, request: AITDirectionFitRequest) -> FittedAITDirection:
+        if (
+            request.activation_representation
+            != self.config.sweep.activation_representation
+        ):
+            raise ValueError(
+                "AIT fit request activation representation does not match the "
+                "experiment configuration"
+            )
         hyperparameters = self._hyperparameters(request.method)
         path = self._checkpoint_path(request, hyperparameters)
         artifact = self._load_compatible(path, request, hyperparameters)
@@ -112,7 +143,20 @@ class AITDirectionFitService:
             "resolved_dataset_revision": self.runtime.get("resolved_dataset_revision"),
             "prepend_bos": self.model.prepend_bos,
             "method": request.method,
+            "activation_representation": request.activation_representation,
             "representation": request.representation,
+            "fit_position": request.fit_position,
+            "training_intervention_position": (
+                request.intervention_position if request.method == "das" else None
+            ),
+            "checkpoint_validation_position": (
+                request.checkpoint_validation_position
+                if request.method == "das"
+                else None
+            ),
+            "include_special_tokens_in_mean_pool": (
+                self.config.sweep.include_special_tokens_in_mean_pool
+            ),
             "layer": request.layer,
             "training_examples": [
                 {
@@ -167,6 +211,16 @@ class AITDirectionFitService:
             and candidate.model_name == self.model.hub_name
             and candidate.metadata.get("artifact_schema_version") == ARTIFACT_SCHEMA_VERSION
             and candidate.metadata.get("representation") == request.representation
+            and candidate.metadata.get("fit_position") == request.fit_position
+            and candidate.metadata.get("activation_representation")
+            == request.activation_representation
+            and candidate.metadata.get("intervention_position")
+            == request.intervention_position
+            and (
+                request.method != "das"
+                or candidate.metadata.get("checkpoint_validation_position")
+                == request.checkpoint_validation_position
+            )
             and candidate.metadata.get("fit_hyperparameters") == dict(hyperparameters)
         )
         return candidate if compatible else None
@@ -194,7 +248,20 @@ class AITDirectionFitService:
                 "artifact_schema_version": ARTIFACT_SCHEMA_VERSION,
                 "domain": "ait_valence",
                 "representation": request.representation,
-                "fit_position": request.representation,
+                "fit_position": request.fit_position,
+                "activation_representation": request.activation_representation,
+                "intervention_position": request.intervention_position,
+                "training_intervention_position": (
+                    request.intervention_position if request.method == "das" else None
+                ),
+                "checkpoint_validation_position": (
+                    request.checkpoint_validation_position
+                    if request.method == "das"
+                    else None
+                ),
+                "include_special_tokens_in_mean_pool": (
+                    self.config.sweep.include_special_tokens_in_mean_pool
+                ),
                 "fit_hyperparameters": dict(hyperparameters),
                 "orientation_convention": "negative_to_positive",
                 "orientation_reference": "ait_train_class_mean_difference",
@@ -224,16 +291,21 @@ class AITDirectionFitService:
                 seed=self.config.seed,
             )
         )
-        if self._validation_layer != request.layer:
+        validation_key = (
+            request.layer,
+            request.checkpoint_validation_position,
+            tuple(str(pair.clean.metadata.get("case_id")) for pair in request.eval_pairs),
+        )
+        if self._validation_key != validation_key:
             self._validation_evaluator = DirectionalPatchingEvaluator(
                 self.adapter,
                 list(request.eval_pairs),
                 layer=request.layer,
                 answers=request.answers,
-                position="all",
+                position=request.checkpoint_validation_position,
                 batch_size=self.model.batch_size,
             )
-            self._validation_layer = request.layer
+            self._validation_key = validation_key
         assert self._validation_evaluator is not None
         validation_evaluator = self._validation_evaluator
 
@@ -254,7 +326,7 @@ class AITDirectionFitService:
             list(request.train_pairs),
             layer=request.layer,
             answers=request.answers,
-            position="all",
+            position=request.intervention_position,
             epoch_validator=validate_epoch,
             checkpoint_metric="validation_loss",
         )

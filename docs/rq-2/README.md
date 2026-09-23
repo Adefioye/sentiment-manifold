@@ -189,6 +189,19 @@ epoch is selected by eval-set validation loss. The disjoint AIT test role then s
 method using `logit_flip_percent`; because it performs selection, it is not treated as an unbiased
 final evaluation set.
 
+The activation representation can be selected explicitly at the CLI:
+
+- `--mean-pool` preserves the default behavior above. Mean difference and logistic regression use
+  masked mean-pooled activations, while DAS continues to train and patch all non-padding tokens;
+  DAS is never trained on a pooled vector.
+- `--last-token` fits mean difference and logistic regression from each prompt's final non-padding
+  token. DAS trains at that final-token position, but its eval-set checkpoint validation and
+  test-role layer-selection evaluation patch all tokens, matching the sentiment-position protocol.
+
+The selected mode is stored in every resolved configuration, checkpoint fingerprint, experiment
+manifest, direction-metadata table, and metric table, preventing the two representations from being
+silently mixed.
+
 ```python
 from sentiment_geometry.experiments import (
     AITValenceDirectionExperiment,
@@ -203,6 +216,20 @@ The equivalent CLI is:
 
 ```bash
 sentiment-geometry train-ait-valence --config configs/ait_valence_directions.yaml
+```
+
+For example, two separate result roots can be produced with:
+
+```bash
+sentiment-geometry train-ait-valence \
+  --config configs/ait_valence_directions.yaml \
+  --mean-pool \
+  --output-dir outputs/ait-valence-mean-pool
+
+sentiment-geometry train-ait-valence \
+  --config configs/ait_valence_directions.yaml \
+  --last-token \
+  --output-dir outputs/ait-valence-last-token
 ```
 
 Private Hub authentication is read from `HF_TOKEN` by default, or from the file named by

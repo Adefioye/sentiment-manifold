@@ -12,6 +12,7 @@ from ...fitting_methods.config import DASConfig, FittingConfig
 from ...models.config import ModelConfig
 
 SUPPORTED_AIT_METHODS = ("mean_diff", "logistic_regression", "das")
+SUPPORTED_AIT_ACTIVATION_REPRESENTATIONS = ("mean_pool", "last_token")
 
 
 @dataclass
@@ -42,6 +43,7 @@ class AITSamplingConfig:
 class AITValenceSweepConfig:
     layers: str | list[int] = "all_non_embedding"
     methods: list[str] = field(default_factory=lambda: list(SUPPORTED_AIT_METHODS))
+    activation_representation: str = "mean_pool"
     output_dir: str = "outputs/ait-valence-directions"
     checkpoint_dir: str = "checkpoints/ait-valence-directions"
     resume: bool = True
@@ -119,6 +121,14 @@ class AITValenceExperimentConfig:
         unknown = sorted(set(self.sweep.methods) - set(SUPPORTED_AIT_METHODS))
         if unknown:
             raise ValueError(f"Unsupported AIT fitting methods: {unknown}")
+        if (
+            self.sweep.activation_representation
+            not in SUPPORTED_AIT_ACTIVATION_REPRESENTATIONS
+        ):
+            raise ValueError(
+                "AIT activation_representation must be one of "
+                f"{SUPPORTED_AIT_ACTIVATION_REPRESENTATIONS}"
+            )
         if self.selection.das_checkpoint_split != "eval":
             raise ValueError("DAS checkpoints must be selected on the AIT eval role")
         if self.selection.das_checkpoint_metric != "validation_loss":
@@ -146,6 +156,20 @@ class AITValenceExperimentConfig:
         result = asdict(self)
         result["source_path"] = str(self.source_path) if self.source_path else None
         return result
+
+    def representation_for(self, method: str) -> str:
+        """Return the saved direction representation for one fitting method."""
+
+        if method not in SUPPORTED_AIT_METHODS:
+            raise ValueError(f"Unsupported AIT fitting method: {method!r}")
+        if self.sweep.activation_representation == "last_token":
+            return "last_token"
+        return "all_tokens" if method == "das" else "masked_mean"
+
+    def intervention_position(self) -> str:
+        """Map the configured representation to the causal patching position."""
+
+        return "final" if self.sweep.activation_representation == "last_token" else "all"
 
 
 def apply_ait_valence_overrides(
@@ -175,6 +199,8 @@ def apply_ait_valence_overrides(
         config.data.hf_token_env = str(args.hf_token_env)
     if getattr(args, "method", None):
         config.sweep.methods = list(dict.fromkeys(args.method))
+    if getattr(args, "ait_activation_representation", None):
+        config.sweep.activation_representation = args.ait_activation_representation
     if getattr(args, "all_non_embedding_layers", False):
         config.sweep.layers = "all_non_embedding"
     elif getattr(args, "layer", None):
@@ -184,6 +210,7 @@ def apply_ait_valence_overrides(
 
 
 __all__ = [
+    "SUPPORTED_AIT_ACTIVATION_REPRESENTATIONS",
     "SUPPORTED_AIT_METHODS",
     "AITDataConfig",
     "AITSamplingConfig",

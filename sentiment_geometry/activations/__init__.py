@@ -3,7 +3,13 @@
 from .extraction import (
     ActivationPosition,
     extract_activations,
+    extract_last_token_activations,
     extract_mean_pooled_activations,
 )
 
-__all__ = ["ActivationPosition", "extract_activations", "extract_mean_pooled_activations"]
+__all__ = [
+    "ActivationPosition",
+    "extract_activations",
+    "extract_last_token_activations",
+    "extract_mean_pooled_activations",
+]

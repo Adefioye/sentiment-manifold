@@ -45,6 +45,8 @@ sampling:
 sweep:
   layers: all_non_embedding
   methods: [mean_diff, logistic_regression, das]
+  # Override from the CLI with --mean-pool or --last-token.
+  activation_representation: mean_pool
   output_dir: outputs/ait-valence-directions
   checkpoint_dir: checkpoints/ait-valence-directions
   resume: true

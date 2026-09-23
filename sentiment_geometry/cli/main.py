@@ -336,6 +336,24 @@ def main(argv: list[str] | None = None) -> None:
         choices=("mean_diff", "logistic_regression", "das"),
         help="fitting method; repeat as needed (the config runs all three by default)",
     )
+    ait_activation_group = ait_valence.add_mutually_exclusive_group()
+    ait_activation_group.add_argument(
+        "--mean-pool",
+        dest="ait_activation_representation",
+        action="store_const",
+        const="mean_pool",
+        help="fit linear AIT directions from masked mean-pooled prompt activations",
+    )
+    ait_activation_group.add_argument(
+        "--last-token",
+        dest="ait_activation_representation",
+        action="store_const",
+        const="last_token",
+        help=(
+            "fit AIT directions at the final non-padding token; DAS validation and "
+            "layer selection still patch all tokens"
+        ),
+    )
     ait_layer_group = ait_valence.add_mutually_exclusive_group()
     ait_layer_group.add_argument("--all-non-embedding-layers", action="store_true")
     ait_layer_group.add_argument("--layer", action="append", type=int)

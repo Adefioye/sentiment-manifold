@@ -10,7 +10,10 @@ import numpy as np
 import pandas as pd
 from tqdm.auto import tqdm
 
-from ...activations import extract_mean_pooled_activations
+from ...activations import (
+    extract_last_token_activations,
+    extract_mean_pooled_activations,
+)
 from ...evaluation import DirectionalPatchingEvaluator
 from ...models import CausalLMAdapter, ModelConfig, clear_device_cache, resolve_device
 from ...persistence import RunArtifactStore
@@ -26,21 +29,25 @@ def _metric_row(
     *,
     model: str,
     method: str,
+    fit_position: str,
     representation: str,
+    activation_representation: str,
+    patch_position: str,
     layer: int,
     result,
 ) -> dict[str, Any]:
     return {
         "model": model,
         "method": method,
-        "fit_position": representation,
+        "fit_position": fit_position,
         "representation": representation,
+        "activation_representation": activation_representation,
         "layer": layer,
         "phase": "layer_selection",
         "selected_layer": False,
         "dataset": "ait_test",
         "dataset_role": "layer_selection",
-        "patch_position": "all",
+        "patch_position": patch_position,
         "n_directed_cases": result.n_pairs,
         "logit_difference_percent": result.recovery_percent,
         "logit_flip_percent": result.flip_percent,
@@ -106,6 +113,11 @@ class AITValenceDirectionExperiment:
                 "resolved_dataset_revision": data.resolved_revision,
                 "models": model_runs,
                 "methods": list(self.config.sweep.methods),
+                "activation_representation": self.config.sweep.activation_representation,
+                "linear_layer_selection_position": self.config.intervention_position(),
+                "das_training_position": self.config.intervention_position(),
+                "das_checkpoint_validation_position": "all",
+                "das_layer_selection_position": "all",
                 "train_examples": len(data.train_examples),
                 "train_directed_cases": len(data.train_pairs),
                 "eval_directed_cases": len(data.eval_pairs),
@@ -156,22 +168,39 @@ class AITValenceDirectionExperiment:
         fitted: dict[tuple[int, str], FittedAITDirection] = {}
         store = RunArtifactStore(output_dir)
         for layer in tqdm(layers, desc=f"{model.name} AIT valence boundaries"):
-            activations = extract_mean_pooled_activations(
-                adapter,
-                data.train_examples,
-                layer,
-                batch_size=model.batch_size,
-                include_special_tokens=self.config.sweep.include_special_tokens_in_mean_pool,
-            )
-            evaluator = DirectionalPatchingEvaluator(
-                adapter,
-                list(data.test_pairs),
-                layer=layer,
-                answers=self.config.data.answers,
-                position="all",
-                batch_size=model.batch_size,
-            )
+            if self.config.sweep.activation_representation == "mean_pool":
+                activations = extract_mean_pooled_activations(
+                    adapter,
+                    data.train_examples,
+                    layer,
+                    batch_size=model.batch_size,
+                    include_special_tokens=(
+                        self.config.sweep.include_special_tokens_in_mean_pool
+                    ),
+                )
+            else:
+                activations = extract_last_token_activations(
+                    adapter,
+                    data.train_examples,
+                    layer,
+                    batch_size=model.batch_size,
+                )
+            evaluators: dict[str, DirectionalPatchingEvaluator] = {}
             for method in self.config.sweep.methods:
+                patch_position = (
+                    "all" if method == "das" else self.config.intervention_position()
+                )
+                evaluator = evaluators.get(patch_position)
+                if evaluator is None:
+                    evaluator = DirectionalPatchingEvaluator(
+                        adapter,
+                        list(data.test_pairs),
+                        layer=layer,
+                        answers=self.config.data.answers,
+                        position=patch_position,
+                        batch_size=model.batch_size,
+                    )
+                    evaluators[patch_position] = evaluator
                 trained = fit_service.fit(
                     AITDirectionFitRequest(
                         examples=data.train_examples,
@@ -182,16 +211,25 @@ class AITValenceDirectionExperiment:
                         method=method,
                         layer=layer,
                         answers=self.config.data.answers,
+                        activation_representation=(
+                            self.config.sweep.activation_representation
+                        ),
                     )
                 )
                 fitted[(layer, method)] = trained
                 representation = str(trained.artifact.metadata["representation"])
+                fit_position = str(trained.artifact.metadata["fit_position"])
                 result = evaluator.evaluate(trained.artifact.vector)
                 tables["metrics"].append(
                     _metric_row(
                         model=model.name,
                         method=method,
+                        fit_position=fit_position,
                         representation=representation,
+                        activation_representation=(
+                            self.config.sweep.activation_representation
+                        ),
+                        patch_position=patch_position,
                         layer=layer,
                         result=result,
                     )
@@ -201,12 +239,16 @@ class AITValenceDirectionExperiment:
                         {
                             "model": model.name,
                             "method": method,
-                            "fit_position": representation,
+                            "fit_position": fit_position,
                             "representation": representation,
+                            "activation_representation": (
+                                self.config.sweep.activation_representation
+                            ),
                             "layer": layer,
                             "phase": "layer_selection",
                             "dataset": "ait_test",
                             "dataset_role": "layer_selection",
+                            "patch_position": patch_position,
                             "case_id": pair.clean.metadata.get("case_id"),
                             **record,
                         }
@@ -216,8 +258,18 @@ class AITValenceDirectionExperiment:
                     {
                         "model": model.name,
                         "method": method,
-                        "fit_position": representation,
+                        "fit_position": fit_position,
                         "representation": representation,
+                        "activation_representation": (
+                            self.config.sweep.activation_representation
+                        ),
+                        "training_intervention_position": metadata.get(
+                            "training_intervention_position"
+                        ),
+                        "checkpoint_validation_position": metadata.get(
+                            "checkpoint_validation_position"
+                        ),
+                        "layer_selection_patch_position": patch_position,
                         "layer": layer,
                         "selected_layer": False,
                         "unit_norm": float(np.linalg.norm(trained.artifact.vector)),
@@ -241,8 +293,17 @@ class AITValenceDirectionExperiment:
                         {
                             "model": model.name,
                             "method": method,
-                            "fit_position": representation,
+                            "fit_position": fit_position,
                             "representation": representation,
+                            "activation_representation": (
+                                self.config.sweep.activation_representation
+                            ),
+                            "training_intervention_position": metadata.get(
+                                "training_intervention_position"
+                            ),
+                            "checkpoint_validation_position": metadata.get(
+                                "checkpoint_validation_position"
+                            ),
                             "layer": layer,
                             "validation_dataset": "ait_eval",
                             **epoch_row,
@@ -259,10 +320,18 @@ class AITValenceDirectionExperiment:
         for row in selection.to_dict(orient="records"):
             row["selection_role"] = "layer_selection"
             row["selection_is_final_evaluation"] = False
+            row["activation_representation"] = (
+                self.config.sweep.activation_representation
+            )
+            row["layer_selection_patch_position"] = (
+                "all"
+                if str(row["method"]) == "das"
+                else self.config.intervention_position()
+            )
             tables["layer_selection"].append(row)
             layer = int(row["selected_layer"])
             method = str(row["method"])
-            representation = str(row["fit_position"])
+            fit_position = str(row["fit_position"])
             checkpoint = fitted[(layer, method)].checkpoint_path
             row["direction_checkpoint"] = str(checkpoint)
             for metric in tables["metrics"]:
@@ -273,7 +342,7 @@ class AITValenceDirectionExperiment:
                 if metadata["method"] == method and metadata["layer"] == layer:
                     metadata["selected_layer"] = True
                     metadata["selection_value_percent"] = row["selection_value_percent"]
-                    metadata["fit_position"] = representation
+                    metadata["fit_position"] = fit_position
         self._flush(store, tables)
         store.write_json(
             "resolved_config.json",

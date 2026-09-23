@@ -73,3 +73,21 @@ def extract_mean_pooled_activations(
         pooled = (hidden.float() * mask.unsqueeze(-1)).sum(dim=1) / counts.unsqueeze(-1)
         chunks.append(pooled.cpu().numpy())
     return np.concatenate(chunks, axis=0)
+
+
+def extract_last_token_activations(
+    adapter: CausalLMAdapter,
+    examples: Sequence[TextExample],
+    layer: int,
+    *,
+    batch_size: int = 16,
+) -> np.ndarray:
+    """Extract each prompt's final non-padding residual-stream activation."""
+
+    return extract_activations(
+        adapter,
+        examples,
+        layer,
+        position="final",
+        batch_size=batch_size,
+    )

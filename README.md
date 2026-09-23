@@ -27,6 +27,8 @@ sentiment-geometry plot --run-dir outputs/results/gpt2-small
 sentiment-geometry train-ait-valence --config configs/ait_valence_directions.yaml
 ```
 
+Choose the AIT representation explicitly with `--mean-pool` or `--last-token`.
+
 Model aliases are `gpt2-small`, `qwen-0.6b`, `gemma-2b`, and `pythia-1.4b`. Commands support CUDA,
 MPS, and CPU through `--device auto`, `cuda`, `mps`, or `cpu`.
 

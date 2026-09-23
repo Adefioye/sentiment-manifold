@@ -12,10 +12,12 @@ def _notebook():
     return json.loads(NOTEBOOK_PATH.read_text(encoding="utf-8"))
 
 
-def test_full_ait_last_token_notebook_code_compiles():
+def test_full_ait_last_token_notebook_is_clean_and_code_compiles():
     notebook = _notebook()
     assert notebook["nbformat"] == 4
     for index, cell in enumerate(notebook["cells"]):
+        assert cell.get("execution_count") is None
+        assert cell.get("outputs", []) == []
         if cell["cell_type"] == "code":
             compile("".join(cell["source"]), f"{NOTEBOOK_PATH}:cell-{index}", "exec")
 
@@ -34,12 +36,13 @@ def test_full_ait_last_token_notebook_locks_full_data_contract():
         '"layer_selection_role": "eval"',
         '"final_evaluation_role": "test"',
         '"test_is_unbiased_final_evaluation": True',
-        'MODEL_NAMES = ["qwen-0.6b"]',
-        'qwen_config.batch_size != 16',
+        'TRAIN_MODEL_NAMES = ["qwen-0.6b"]',
+        'REPORT_MODEL_NAMES = ["gpt2-small", "qwen-0.6b"]',
+        'if RUN_EXPERIMENT and DEVICE == "cuda"',
+        "qwen_config.batch_size != 16",
         'base_config.das.batch_size != 16',
         '"n_matched_pairs"',
-        'values="n_examples"',
-        'values="n_directed_cases"',
+        '"gpt2-small": "gpt2_small_matched_pairs"',
         '"qwen-0.6b": "qwen_0_6b_matched_pairs"',
     ):
         assert required in source
@@ -50,16 +53,18 @@ def test_full_ait_last_token_notebook_reports_test_metrics_and_snapshot_cosines(
         "".join(cell.get("source", [])) for cell in _notebook()["cells"]
     )
     for required in (
-        "all_models_final_metrics.csv",
-        "all_models_final_patching_records.csv",
-        'values="logit_flip_percent"',
-        'values="sign_flip_percent"',
-        '"Locked-test logit flip percent"',
-        '"Locked-test sign flip percent"',
-        "all_models_direction_similarities.csv",
+        "load_ait_valence_report_data",
+        "essential_dataset_counts.csv",
+        "essential_validation_selection.csv",
+        "essential_locked_test_metrics.csv",
+        '"validation_logit_flip_percent"',
+        '"logit_flip_percent"',
+        '"sign_flip_percent"',
+        '"Locked-test essential metrics"',
         "snapshot_similarity_summary.csv",
         '["first", "middle", "last"]',
         "plot_ait_valence_run",
+        "model_names=REPORT_MODEL_NAMES",
         "figure_manifest.csv",
     ):
         assert required in source

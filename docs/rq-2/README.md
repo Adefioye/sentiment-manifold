@@ -201,7 +201,9 @@ The Qwen-only continuation notebook for this contract is
 It invokes the full-data configuration with `--last-token` and `--model qwen-0.6b`, uses batch
 size 16 for both Qwen model evaluation and DAS training, writes checkpoints and CSVs to a
 timestamped or explicitly resumed Google Drive run, displays validation selections and
-locked-test metrics, and saves first/middle/last-boundary cosine-similarity tables and heatmaps.
+locked-test metrics for GPT-2 Small and Qwen by loading their per-model result directories, and
+saves first/middle/last-boundary cosine-similarity tables and heatmaps. This avoids treating the
+Qwen-only root aggregate CSVs from the continuation as a two-model report.
 
 Mean difference and logistic regression fit masked mean-pooled residual activations over all
 non-padding, non-special prompt tokens. One-dimensional DAS retains causal training semantics: it

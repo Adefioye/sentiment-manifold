@@ -3,7 +3,11 @@ from __future__ import annotations
 import pandas as pd
 import pytest
 
-from sentiment_geometry.reporting import select_table1_best_layers, table1_cell_text
+from sentiment_geometry.reporting import (
+    load_ait_valence_report_data,
+    select_table1_best_layers,
+    table1_cell_text,
+)
 
 
 def _layer_metrics() -> pd.DataFrame:
@@ -88,3 +92,44 @@ def test_table1_selection_rejects_a_missing_metric_instead_of_silently_omitting_
 
     with pytest.raises(ValueError, match="sst_logit_flip_percent"):
         select_table1_best_layers(metrics)
+
+
+def test_ait_report_loader_combines_explicit_per_model_tables(tmp_path):
+    table_names = (
+        "dataset_summary",
+        "metrics",
+        "final_metrics",
+        "direction_metadata",
+        "direction_similarities",
+        "layer_selection",
+    )
+    for index, model_name in enumerate(("gpt2-small", "qwen-0.6b")):
+        model_dir = tmp_path / model_name
+        model_dir.mkdir()
+        for table_name in table_names:
+            pd.DataFrame(
+                [{"model": model_name, "table": table_name, "order": index}]
+            ).to_csv(model_dir / f"{table_name}.csv", index=False)
+
+    report = load_ait_valence_report_data(
+        tmp_path,
+        model_names=["gpt2-small", "qwen-0.6b"],
+    )
+
+    assert report.dataset_summary["model"].tolist() == ["gpt2-small", "qwen-0.6b"]
+    assert report.final_metrics["model"].tolist() == ["gpt2-small", "qwen-0.6b"]
+    assert report.direction_similarities["model"].tolist() == [
+        "gpt2-small",
+        "qwen-0.6b",
+    ]
+
+
+def test_ait_report_loader_rejects_mislabeled_model_table(tmp_path):
+    model_dir = tmp_path / "gpt2-small"
+    model_dir.mkdir()
+    pd.DataFrame([{"model": "qwen-0.6b"}]).to_csv(
+        model_dir / "dataset_summary.csv", index=False
+    )
+
+    with pytest.raises(ValueError, match="expected only 'gpt2-small'"):
+        load_ait_valence_report_data(tmp_path, model_names=["gpt2-small"])

@@ -716,6 +716,13 @@ def test_ait_experiment_smoke_writes_and_selects_all_three_methods(
         figures = plot_ait_valence_run(output, figure_dir=tmp_path / "figures")
         assert len(figures) == 5
         assert all(path.is_file() for path in figures)
+        per_model_figures = plot_ait_valence_run(
+            output,
+            figure_dir=tmp_path / "per-model-figures",
+            model_names=["gpt2-small"],
+        )
+        assert len(per_model_figures) == 5
+        assert all(path.is_file() for path in per_model_figures)
 
 
 def test_full_ait_experiment_selects_on_validation_then_evaluates_locked_test(

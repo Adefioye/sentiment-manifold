@@ -102,7 +102,9 @@ def plot_ait_valence_run(
     )
     axis.set_xlabel("Model")
     axis.set_ylabel("Selected-layer logit flip percent")
-    axis.set_title("AIT last-token directions selected by test-role logit flip")
+    selection_roles = sorted(set(selection.get("selection_role", ["configured"])))
+    selection_label = "/".join(str(role) for role in selection_roles)
+    axis.set_title(f"AIT last-token directions selected by {selection_label}-role logit flip")
     figure.tight_layout()
     path = figure_dir / "selected_layer_logit_flip_percent.png"
     figure.savefig(path, dpi=180, bbox_inches="tight")
@@ -128,9 +130,7 @@ def plot_ait_valence_run(
         )
         axis.set_title(f"{model}: absolute direction cosine — boundary {int(layer)}")
         figure.tight_layout()
-        path = figure_dir / (
-            f"absolute_cosine_{_slug(str(model))}_boundary{int(layer):02d}.png"
-        )
+        path = figure_dir / (f"absolute_cosine_{_slug(str(model))}_boundary{int(layer):02d}.png")
         figure.savefig(path, dpi=180, bbox_inches="tight")
         plt.close(figure)
         outputs.append(path)

@@ -187,6 +187,15 @@ The deterministic per-model sample contract is 55 train examples, 30 eval direct
 raw cross-model metric differences are not treated as paired estimates because the model-specific
 pair sets can differ.
 
+A separate full-data contract is configured in
+[`configs/full_ait_valence_directions.yaml`](../../configs/full_ait_valence_directions.yaml).
+Its three sampling caps are `null`, which instructs the loader to consume every matched pair in
+each model-specific source split. It does not pool or repartition AIT: original train pairs fit the
+directions, original validation pairs select DAS epochs and the best layer for every method, and
+the original test pairs are evaluated only after the selection is frozen. The pinned artifact
+contains 321/99/273 train/validation/test pairs for GPT-2 Small, 323/118/274 for Qwen 0.6B,
+339/113/273 for Gemma 2B, and 333/114/266 for Pythia 1.4B.
+
 Mean difference and logistic regression fit masked mean-pooled residual activations over all
 non-padding, non-special prompt tokens. One-dimensional DAS retains causal training semantics: it
 uses the directed train pairs and patches all non-padding token positions. At every layer, the DAS
@@ -222,6 +231,24 @@ The equivalent CLI is:
 ```bash
 sentiment-geometry train-ait-valence --config configs/ait_valence_directions.yaml
 ```
+
+The full-data API and CLI use the same public experiment boundary:
+
+```python
+config = AITValenceExperimentConfig.load(
+    "configs/full_ait_valence_directions.yaml"
+)
+AITValenceDirectionExperiment(config).run()
+```
+
+```bash
+sentiment-geometry train-ait-valence \
+  --config configs/full_ait_valence_directions.yaml
+```
+
+For this contract, `metrics.csv` contains validation layer curves followed by the locked test
+rows. `final_metrics.csv` and `final_patching_records.csv` contain only the frozen test evaluation;
+`selected_metrics.csv` is likewise restricted to those post-selection test rows.
 
 For example, two separate result roots can be produced with:
 

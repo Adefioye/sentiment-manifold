@@ -161,16 +161,18 @@ def _sample_matches(
     return tuple(ordered[:count])
 
 
-def _sample_rows(
+def _select_rows(
     loaded: HuggingFaceRows,
     *,
     split: str,
-    count: int,
+    count: int | None,
     seed: int,
     config_name: str,
 ) -> tuple[Mapping[str, Any], ...]:
     for row in loaded.rows:
         _validate_match(row, split=split)
+    if count is None:
+        return tuple(sorted(loaded.rows, key=lambda row: str(row["pair_id"])))
     return _sample_matches(
         loaded.rows,
         count=count,
@@ -216,15 +218,21 @@ class AITDatasetLoader:
             raise RuntimeError(f"AIT splits resolved to different revisions: {resolved}")
         resolved_revision = next(iter(resolved))
 
-        train_match_count = (sampling.train_examples + 1) // 2
-        selected_train = _sample_rows(
+        train_match_count = (
+            None if sampling.train_examples is None else (sampling.train_examples + 1) // 2
+        )
+        selected_train = _select_rows(
             loaded_by_role["train"],
             split=data.train_split,
             count=train_match_count,
             seed=self.config.seed,
             config_name=config_name,
         )
-        complete_train_matches = selected_train[: sampling.train_examples // 2]
+        complete_train_matches = (
+            selected_train
+            if sampling.train_examples is None
+            else selected_train[: sampling.train_examples // 2]
+        )
         train_pairs = _directed_pairs(
             complete_train_matches,
             split=data.train_split,
@@ -249,7 +257,7 @@ class AITDatasetLoader:
                     for polarity in ("positive", "negative")
                 ]
             )
-        if sampling.train_examples % 2:
+        if sampling.train_examples is not None and sampling.train_examples % 2:
             train_examples.append(
                 _example(
                     selected_train[-1],
@@ -262,24 +270,28 @@ class AITDatasetLoader:
                 )
             )
 
-        selected_eval = _sample_rows(
+        selected_eval = _select_rows(
             loaded_by_role["eval"],
             split=data.eval_split,
-            count=sampling.eval_directed_cases // 2,
+            count=(
+                None if sampling.eval_directed_cases is None else sampling.eval_directed_cases // 2
+            ),
             seed=self.config.seed + 1,
             config_name=config_name,
         )
-        selected_test = _sample_rows(
+        selected_test = _select_rows(
             loaded_by_role["test"],
             split=data.test_split,
-            count=sampling.test_directed_cases // 2,
+            count=(
+                None if sampling.test_directed_cases is None else sampling.test_directed_cases // 2
+            ),
             seed=self.config.seed + 2,
             config_name=config_name,
         )
         eval_pairs = _directed_pairs(
             selected_eval,
             split=data.eval_split,
-            role="das_checkpoint_validation",
+            role="eval",
             repo_id=data.repo_id,
             config_name=config_name,
             revision=resolved_revision,
@@ -287,7 +299,7 @@ class AITDatasetLoader:
         test_pairs = _directed_pairs(
             selected_test,
             split=data.test_split,
-            role="layer_selection",
+            role="test",
             repo_id=data.repo_id,
             config_name=config_name,
             revision=resolved_revision,
@@ -312,9 +324,7 @@ class AITDatasetLoader:
                 raise RuntimeError(f"AIT {left}/{right} leakage: {sorted(overlap)}")
 
         das_train_ids = {
-            example.example_id
-            for pair in train_pairs
-            for example in (pair.clean, pair.corrupted)
+            example.example_id for pair in train_pairs for example in (pair.clean, pair.corrupted)
         }
         sample_rows = [
             {
@@ -329,6 +339,7 @@ class AITDatasetLoader:
                 "used_by_das_training": example.example_id in das_train_ids,
                 "used_for_das_checkpoint_validation": False,
                 "used_for_layer_selection": False,
+                "used_for_final_evaluation": False,
                 "prompt": example.text,
             }
             for example in train_examples
@@ -347,13 +358,16 @@ class AITDatasetLoader:
                     "source_split": example.metadata["split"],
                     "example_id": example.example_id,
                     "label": example.label,
-                    "original_valence_class": example.metadata.get(
-                        "original_valence_class"
-                    ),
+                    "original_valence_class": example.metadata.get("original_valence_class"),
                     "used_by_linear_training": False,
                     "used_by_das_training": False,
                     "used_for_das_checkpoint_validation": role == "eval",
-                    "used_for_layer_selection": role == "test",
+                    "used_for_layer_selection": (
+                        role == self.config.selection.layer_selection_split
+                    ),
+                    "used_for_final_evaluation": (
+                        role == self.config.selection.final_evaluation_split
+                    ),
                     "prompt": example.text,
                 }
                 for example in sorted(examples_by_id.values(), key=lambda row: row.example_id)

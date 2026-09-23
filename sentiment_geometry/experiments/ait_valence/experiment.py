@@ -1,4 +1,4 @@
-"""Train AIT valence directions and select layers on a disjoint AIT split."""
+"""Train, select, and evaluate AIT valence directions on explicit data roles."""
 
 from __future__ import annotations
 
@@ -39,6 +39,10 @@ def _metric_row(
     patch_position: str,
     layer: int,
     result,
+    phase: str,
+    dataset: str,
+    dataset_role: str,
+    selected_layer: bool,
 ) -> dict[str, Any]:
     return {
         "model": model,
@@ -47,10 +51,10 @@ def _metric_row(
         "representation": representation,
         "activation_representation": activation_representation,
         "layer": layer,
-        "phase": "layer_selection",
-        "selected_layer": False,
-        "dataset": "ait_test",
-        "dataset_role": "layer_selection",
+        "phase": phase,
+        "selected_layer": selected_layer,
+        "dataset": dataset,
+        "dataset_role": dataset_role,
         "patch_position": patch_position,
         "n_directed_cases": result.n_pairs,
         "logit_difference_percent": result.recovery_percent,
@@ -86,12 +90,9 @@ class AITValenceDirectionExperiment:
         store = RunArtifactStore(output_root)
         store.write_json("requested_config.json", self.config.to_dict())
         prepared_by_model = {
-            model.name: self.dataset_loader.load(model.name)
-            for model in self.config.models
+            model.name: self.dataset_loader.load(model.name) for model in self.config.models
         }
-        resolved_revisions = {
-            data.resolved_revision for data in prepared_by_model.values()
-        }
+        resolved_revisions = {data.resolved_revision for data in prepared_by_model.values()}
         if len(resolved_revisions) != 1:
             raise RuntimeError(
                 "AIT model-specific configurations resolved to different revisions: "
@@ -99,19 +100,11 @@ class AITValenceDirectionExperiment:
             )
         resolved_revision = next(iter(resolved_revisions))
         sample_manifest = [
-            row
-            for data in prepared_by_model.values()
-            for row in data.sample_manifest
+            row for data in prepared_by_model.values() for row in data.sample_manifest
         ]
-        pair_manifest = [
-            row
-            for data in prepared_by_model.values()
-            for row in data.pair_manifest
-        ]
+        pair_manifest = [row for data in prepared_by_model.values() for row in data.pair_manifest]
         dataset_summary = [
-            row
-            for data in prepared_by_model.values()
-            for row in self._dataset_summary(data)
+            row for data in prepared_by_model.values() for row in self._dataset_summary(data)
         ]
         store.write_rows("sample_manifest.csv", sample_manifest)
         store.write_rows("pair_manifest.csv", pair_manifest)
@@ -120,13 +113,13 @@ class AITValenceDirectionExperiment:
             model_store = RunArtifactStore(output_root / model_name)
             model_store.write_rows("sample_manifest.csv", data.sample_manifest)
             model_store.write_rows("pair_manifest.csv", data.pair_manifest)
-            model_store.write_rows(
-                "dataset_summary.csv", self._dataset_summary(data)
-            )
+            model_store.write_rows("dataset_summary.csv", self._dataset_summary(data))
 
         combined: dict[str, list[dict[str, Any]]] = {
             "metrics": [],
             "patching_records": [],
+            "final_metrics": [],
+            "final_patching_records": [],
             "direction_metadata": [],
             "das_epoch_metrics": [],
             "direction_similarities": [],
@@ -164,19 +157,17 @@ class AITValenceDirectionExperiment:
                 "requested_dataset_revision": self.config.data.revision,
                 "resolved_dataset_revision": resolved_revision,
                 "model_matched_configs": {
-                    name: data.dataset_config
-                    for name, data in prepared_by_model.items()
+                    name: data.dataset_config for name, data in prepared_by_model.items()
                 },
                 "models": model_runs,
                 "methods": list(self.config.sweep.methods),
                 "activation_representation": self.config.sweep.activation_representation,
+                "sampling_uses_all_available": (self.config.sampling.uses_all_available),
                 "linear_layer_selection_position": self.config.intervention_position(),
                 "das_training_position": self.config.intervention_position(),
                 "das_checkpoint_validation_position": "all",
                 "das_layer_selection_position": "all",
-                "requested_train_examples_per_model": (
-                    self.config.sampling.train_examples
-                ),
+                "requested_train_examples_per_model": (self.config.sampling.train_examples),
                 "requested_eval_directed_cases_per_model": (
                     self.config.sampling.eval_directed_cases
                 ),
@@ -184,8 +175,15 @@ class AITValenceDirectionExperiment:
                     self.config.sampling.test_directed_cases
                 ),
                 "das_checkpoint_role": "eval",
-                "layer_selection_role": "test",
-                "test_is_layer_selection_not_final_evaluation": True,
+                "layer_selection_role": self.config.selection.layer_selection_split,
+                "final_evaluation_role": (self.config.selection.final_evaluation_split),
+                "test_is_layer_selection_not_final_evaluation": (
+                    self.config.selection.layer_selection_split == "test"
+                    and self.config.selection.final_evaluation_split is None
+                ),
+                "test_is_locked_final_evaluation": (
+                    self.config.selection.final_evaluation_split == "test"
+                ),
             },
         )
         return output_root
@@ -224,6 +222,8 @@ class AITValenceDirectionExperiment:
         tables: dict[str, list[dict[str, Any]]] = {
             "metrics": [],
             "patching_records": [],
+            "final_metrics": [],
+            "final_patching_records": [],
             "direction_metadata": [],
             "das_epoch_metrics": [],
             "direction_similarities": [],
@@ -232,6 +232,9 @@ class AITValenceDirectionExperiment:
         }
         fitted: dict[tuple[int, str], FittedAITDirection] = {}
         store = RunArtifactStore(output_dir)
+        selection_role = self.config.selection.layer_selection_split
+        selection_pairs = self._pairs_for_role(data, selection_role)
+        selection_dataset = f"ait_{selection_role}"
         for layer in tqdm(layers, desc=f"{model.name} AIT valence boundaries"):
             if self.config.sweep.activation_representation == "mean_pool":
                 activations = extract_mean_pooled_activations(
@@ -239,9 +242,7 @@ class AITValenceDirectionExperiment:
                     data.train_examples,
                     layer,
                     batch_size=model.batch_size,
-                    include_special_tokens=(
-                        self.config.sweep.include_special_tokens_in_mean_pool
-                    ),
+                    include_special_tokens=(self.config.sweep.include_special_tokens_in_mean_pool),
                 )
             else:
                 activations = extract_last_token_activations(
@@ -253,14 +254,12 @@ class AITValenceDirectionExperiment:
             evaluators: dict[str, DirectionalPatchingEvaluator] = {}
             directions_at_layer: dict[tuple[str, str], np.ndarray] = {}
             for method in self.config.sweep.methods:
-                patch_position = (
-                    "all" if method == "das" else self.config.intervention_position()
-                )
+                patch_position = "all" if method == "das" else self.config.intervention_position()
                 evaluator = evaluators.get(patch_position)
                 if evaluator is None:
                     evaluator = DirectionalPatchingEvaluator(
                         adapter,
-                        list(data.test_pairs),
+                        list(selection_pairs),
                         layer=layer,
                         answers=self.config.data.answers,
                         position=patch_position,
@@ -277,9 +276,7 @@ class AITValenceDirectionExperiment:
                         method=method,
                         layer=layer,
                         answers=self.config.data.answers,
-                        activation_representation=(
-                            self.config.sweep.activation_representation
-                        ),
+                        activation_representation=(self.config.sweep.activation_representation),
                     )
                 )
                 fitted[(layer, method)] = trained
@@ -293,15 +290,17 @@ class AITValenceDirectionExperiment:
                         method=method,
                         fit_position=fit_position,
                         representation=representation,
-                        activation_representation=(
-                            self.config.sweep.activation_representation
-                        ),
+                        activation_representation=(self.config.sweep.activation_representation),
                         patch_position=patch_position,
                         layer=layer,
                         result=result,
+                        phase="layer_selection",
+                        dataset=selection_dataset,
+                        dataset_role="layer_selection",
+                        selected_layer=False,
                     )
                 )
-                for record, pair in zip(result.records, data.test_pairs):
+                for record, pair in zip(result.records, selection_pairs):
                     tables["patching_records"].append(
                         {
                             "model": model.name,
@@ -313,7 +312,7 @@ class AITValenceDirectionExperiment:
                             ),
                             "layer": layer,
                             "phase": "layer_selection",
-                            "dataset": "ait_test",
+                            "dataset": selection_dataset,
                             "dataset_role": "layer_selection",
                             "patch_position": patch_position,
                             "case_id": pair.clean.metadata.get("case_id"),
@@ -327,9 +326,7 @@ class AITValenceDirectionExperiment:
                         "method": method,
                         "fit_position": fit_position,
                         "representation": representation,
-                        "activation_representation": (
-                            self.config.sweep.activation_representation
-                        ),
+                        "activation_representation": (self.config.sweep.activation_representation),
                         "training_intervention_position": metadata.get(
                             "training_intervention_position"
                         ),
@@ -337,20 +334,17 @@ class AITValenceDirectionExperiment:
                             "checkpoint_validation_position"
                         ),
                         "layer_selection_patch_position": patch_position,
+                        "layer_selection_dataset": selection_dataset,
                         "layer": layer,
                         "selected_layer": False,
                         "unit_norm": float(np.linalg.norm(trained.artifact.vector)),
                         "selected_epoch": metadata.get("selected_epoch"),
                         "best_checkpoint_metric": metadata.get("best_checkpoint_metric"),
-                        "checkpoint_selection_metric": metadata.get(
-                            "checkpoint_selection_metric"
-                        ),
+                        "checkpoint_selection_metric": metadata.get("checkpoint_selection_metric"),
                         "artifact_path": str(trained.checkpoint_path),
                         "dataset_repo_id": metadata.get("dataset_repo_id"),
                         "dataset_config": metadata.get("dataset_config"),
-                        "resolved_dataset_revision": metadata.get(
-                            "resolved_dataset_revision"
-                        ),
+                        "resolved_dataset_revision": metadata.get("resolved_dataset_revision"),
                         "model_revision": metadata.get("model_revision"),
                         "tokenizer_revision": metadata.get("tokenizer_revision"),
                     }
@@ -389,19 +383,15 @@ class AITValenceDirectionExperiment:
 
         selection = select_layers_by_validation_metric(
             pd.DataFrame(tables["metrics"]),
-            dataset="ait_test",
+            dataset=selection_dataset,
             metric=self.config.selection.layer_selection_metric,
         )
         for row in selection.to_dict(orient="records"):
-            row["selection_role"] = "layer_selection"
+            row["selection_role"] = selection_role
             row["selection_is_final_evaluation"] = False
-            row["activation_representation"] = (
-                self.config.sweep.activation_representation
-            )
+            row["activation_representation"] = self.config.sweep.activation_representation
             row["layer_selection_patch_position"] = (
-                "all"
-                if str(row["method"]) == "das"
-                else self.config.intervention_position()
+                "all" if str(row["method"]) == "das" else self.config.intervention_position()
             )
             tables["layer_selection"].append(row)
             layer = int(row["selected_layer"])
@@ -412,12 +402,68 @@ class AITValenceDirectionExperiment:
             for metric in tables["metrics"]:
                 if metric["method"] == method and metric["layer"] == layer:
                     metric["selected_layer"] = True
-                    tables["selected_metrics"].append(dict(metric))
+                    if self.config.selection.final_evaluation_split is None:
+                        tables["selected_metrics"].append(dict(metric))
             for metadata in tables["direction_metadata"]:
                 if metadata["method"] == method and metadata["layer"] == layer:
                     metadata["selected_layer"] = True
                     metadata["selection_value_percent"] = row["selection_value_percent"]
                     metadata["fit_position"] = fit_position
+        final_role = self.config.selection.final_evaluation_split
+        if final_role is not None:
+            final_pairs = self._pairs_for_role(data, final_role)
+            final_dataset = f"ait_{final_role}"
+            for selected in selection.itertuples(index=False):
+                layer = int(selected.selected_layer)
+                method = str(selected.method)
+                trained = fitted[(layer, method)]
+                representation = str(trained.artifact.metadata["representation"])
+                fit_position = str(trained.artifact.metadata["fit_position"])
+                patch_position = "all" if method == "das" else self.config.intervention_position()
+                evaluator = DirectionalPatchingEvaluator(
+                    adapter,
+                    list(final_pairs),
+                    layer=layer,
+                    answers=self.config.data.answers,
+                    position=patch_position,
+                    batch_size=model.batch_size,
+                )
+                result = evaluator.evaluate(trained.artifact.vector)
+                metric = _metric_row(
+                    model=model.name,
+                    method=method,
+                    fit_position=fit_position,
+                    representation=representation,
+                    activation_representation=(self.config.sweep.activation_representation),
+                    patch_position=patch_position,
+                    layer=layer,
+                    result=result,
+                    phase="final_evaluation",
+                    dataset=final_dataset,
+                    dataset_role="final_evaluation",
+                    selected_layer=True,
+                )
+                tables["metrics"].append(metric)
+                tables["final_metrics"].append(dict(metric))
+                tables["selected_metrics"].append(dict(metric))
+                for record, pair in zip(result.records, final_pairs):
+                    patching_record = {
+                        "model": model.name,
+                        "method": method,
+                        "fit_position": fit_position,
+                        "representation": representation,
+                        "activation_representation": (self.config.sweep.activation_representation),
+                        "layer": layer,
+                        "phase": "final_evaluation",
+                        "selected_layer": True,
+                        "dataset": final_dataset,
+                        "dataset_role": "final_evaluation",
+                        "patch_position": patch_position,
+                        "case_id": pair.clean.metadata.get("case_id"),
+                        **record,
+                    }
+                    tables["patching_records"].append(patching_record)
+                    tables["final_patching_records"].append(dict(patching_record))
         self._flush(store, tables)
         store.write_json(
             "resolved_config.json",
@@ -432,6 +478,14 @@ class AITValenceDirectionExperiment:
         del adapter
         clear_device_cache(device_spec.device)
         return tables, runtime
+
+    @staticmethod
+    def _pairs_for_role(data: PreparedAITData, role: str) -> tuple:
+        if role == "eval":
+            return data.eval_pairs
+        if role == "test":
+            return data.test_pairs
+        raise ValueError(f"Unknown AIT evaluation role: {role!r}")
 
     @staticmethod
     def _flush(store: RunArtifactStore, tables: dict[str, list[dict[str, Any]]]) -> None:
@@ -456,7 +510,7 @@ class AITValenceDirectionExperiment:
                 "dataset_config": data.dataset_config,
                 "resolved_dataset_revision": data.resolved_revision,
                 "dataset": "ait",
-                "role": "das_checkpoint_validation",
+                "role": self._evaluation_roles("eval"),
                 "source_split": self.config.data.eval_split,
                 "n_examples": len(
                     {
@@ -472,7 +526,7 @@ class AITValenceDirectionExperiment:
                 "dataset_config": data.dataset_config,
                 "resolved_dataset_revision": data.resolved_revision,
                 "dataset": "ait",
-                "role": "layer_selection",
+                "role": self._evaluation_roles("test"),
                 "source_split": self.config.data.test_split,
                 "n_examples": len(
                     {
@@ -484,6 +538,16 @@ class AITValenceDirectionExperiment:
                 "n_directed_cases": len(data.test_pairs),
             },
         ]
+
+    def _evaluation_roles(self, role: str) -> str:
+        purposes: list[str] = []
+        if role == self.config.selection.das_checkpoint_split:
+            purposes.append("das_checkpoint_validation")
+        if role == self.config.selection.layer_selection_split:
+            purposes.append("layer_selection")
+        if role == self.config.selection.final_evaluation_split:
+            purposes.append("final_evaluation")
+        return "+".join(purposes) or "configured_evaluation"
 
 
 def run_ait_valence_direction_experiment(config: AITValenceExperimentConfig) -> Path:

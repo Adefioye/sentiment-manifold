@@ -1,9 +1,13 @@
 """Reusable, domain-named experiment APIs."""
 
 from .ait_valence import (
+    AITDataConfig,
     AITDatasetLoader,
+    AITSamplingConfig,
     AITValenceDirectionExperiment,
     AITValenceExperimentConfig,
+    AITValenceSelectionConfig,
+    AITValenceSweepConfig,
     PreparedAITData,
     apply_ait_valence_overrides,
     run_ait_valence_direction_experiment,
@@ -24,9 +28,13 @@ from .sentiment_position import (
 )
 
 __all__ = [
+    "AITDataConfig",
     "AITDatasetLoader",
+    "AITSamplingConfig",
     "AITValenceDirectionExperiment",
     "AITValenceExperimentConfig",
+    "AITValenceSelectionConfig",
+    "AITValenceSweepConfig",
     "DirectionArtifactAudit",
     "FrozenDirectionEvaluationConfig",
     "FrozenDirectionSelection",

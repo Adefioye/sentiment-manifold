@@ -18,6 +18,7 @@ from sentiment_geometry.experiments import AITValenceExperimentConfig
 from sentiment_geometry.experiments.ait_valence.config import (
     AITDataConfig,
     AITSamplingConfig,
+    AITValenceSelectionConfig,
     AITValenceSweepConfig,
 )
 from sentiment_geometry.experiments.ait_valence.datasets import AITDatasetLoader
@@ -77,9 +78,7 @@ def _small_config(tmp_path: Path) -> AITValenceExperimentConfig:
 
 
 def test_ait_config_loads_separate_reproducible_contract():
-    config = AITValenceExperimentConfig.load(
-        PROJECT_ROOT / "configs/ait_valence_directions.yaml"
-    )
+    config = AITValenceExperimentConfig.load(PROJECT_ROOT / "configs/ait_valence_directions.yaml")
 
     assert config.sampling.train_examples == 55
     assert config.sampling.eval_directed_cases == 30
@@ -95,6 +94,30 @@ def test_ait_config_loads_separate_reproducible_contract():
     assert config.sweep.activation_representation == "mean_pool"
     assert config.selection.das_checkpoint_split == "eval"
     assert config.selection.layer_selection_split == "test"
+    assert config.selection.final_evaluation_split is None
+
+
+def test_full_ait_config_uses_all_model_specific_splits_and_locks_test():
+    config = AITValenceExperimentConfig.load(
+        PROJECT_ROOT / "configs/full_ait_valence_directions.yaml"
+    )
+
+    assert config.sampling.uses_all_available
+    assert config.sampling.train_examples is None
+    assert config.sampling.eval_directed_cases is None
+    assert config.sampling.test_directed_cases is None
+    assert config.sweep.activation_representation == "last_token"
+    assert config.selection.das_checkpoint_split == "eval"
+    assert config.selection.layer_selection_split == "eval"
+    assert config.selection.final_evaluation_split == "test"
+
+
+def test_ait_config_requires_final_evaluation_to_be_disjoint(tmp_path):
+    config = _small_config(tmp_path)
+    config.selection.final_evaluation_split = "test"
+
+    with pytest.raises(ValueError, match="must be disjoint"):
+        config.validate()
 
 
 def test_ait_loader_builds_deterministic_disjoint_roles(tmp_path):
@@ -141,16 +164,46 @@ def test_ait_loader_builds_deterministic_disjoint_roles(tmp_path):
     assert not (role_ids["eval"] & role_ids["test"])
     assert {row["role"] for row in first.sample_manifest} == {"train", "eval", "test"}
     assert {row["model"] for row in first.sample_manifest} == {"gpt2-small"}
-    assert {row["dataset_config"] for row in first.sample_manifest} == {
-        "gpt2_small_matched_pairs"
-    }
+    assert {row["dataset_config"] for row in first.sample_manifest} == {"gpt2_small_matched_pairs"}
     assert sum(row["used_by_das_training"] for row in first.sample_manifest) == 4
-    assert sum(
-        row["used_for_das_checkpoint_validation"] for row in first.sample_manifest
-    ) == 4
+    assert sum(row["used_for_das_checkpoint_validation"] for row in first.sample_manifest) == 4
     assert sum(row["used_for_layer_selection"] for row in first.sample_manifest) == 4
     assert {row["role"] for row in first.pair_manifest} == {"train", "eval", "test"}
     assert {row["model"] for row in first.pair_manifest} == {"gpt2-small"}
+
+
+def test_ait_loader_can_consume_every_model_specific_pair(tmp_path):
+    config = _small_config(tmp_path)
+    config.sampling = AITSamplingConfig(
+        train_examples=None,
+        eval_directed_cases=None,
+        test_directed_cases=None,
+    )
+    config.selection = AITValenceSelectionConfig(
+        layer_selection_split="eval",
+        final_evaluation_split="test",
+    )
+    rows = {
+        "train": _matched_rows("train", 8),
+        "validation": _matched_rows("validation", 5),
+        "test": _matched_rows("test", 6),
+    }
+
+    def load_rows(repo_id, *, config_name, split, revision, **kwargs):
+        return HuggingFaceRows(rows[split], revision, "resolved-dataset-commit")
+
+    prepared = AITDatasetLoader(config, rows_loader=load_rows).load("gpt2-small")
+
+    assert len(prepared.train_examples) == 16
+    assert len(prepared.train_pairs) == 16
+    assert len(prepared.eval_pairs) == 10
+    assert len(prepared.test_pairs) == 12
+    eval_rows = [row for row in prepared.sample_manifest if row["role"] == "eval"]
+    test_rows = [row for row in prepared.sample_manifest if row["role"] == "test"]
+    assert all(row["used_for_layer_selection"] for row in eval_rows)
+    assert not any(row["used_for_final_evaluation"] for row in eval_rows)
+    assert all(row["used_for_final_evaluation"] for row in test_rows)
+    assert not any(row["used_for_layer_selection"] for row in test_rows)
 
 
 def test_ait_loader_selects_the_model_specific_pair_configuration(tmp_path):
@@ -244,9 +297,7 @@ def test_last_token_extraction_uses_each_prompt_final_non_padding_position():
             assert position == "final"
             return batch.attention_mask.sum(dim=1).long() - 1
 
-    extracted = extract_last_token_activations(
-        FakeAdapter(), examples, 1, batch_size=2
-    )
+    extracted = extract_last_token_activations(FakeAdapter(), examples, 1, batch_size=2)
 
     np.testing.assert_allclose(extracted, np.asarray([[3.0, 30.0], [5.0, 50.0]]))
 
@@ -307,18 +358,14 @@ def test_linear_ait_direction_uses_portable_direction_artifact(tmp_path):
     np.testing.assert_allclose(fitted.artifact.vector, np.asarray([1.0, 0.0]))
     assert fitted.artifact.metadata["domain"] == "ait_valence"
     assert fitted.artifact.metadata["representation"] == "masked_mean"
-    assert fitted.artifact.metadata["orientation_reference"] == (
-        "ait_train_class_mean_difference"
-    )
+    assert fitted.artifact.metadata["orientation_reference"] == ("ait_train_class_mean_difference")
     assert fitted.artifact.metadata["requested_dataset_revision"] == "dataset-commit"
     with np.load(fitted.checkpoint_path, allow_pickle=False) as saved:
         header = json.loads(str(saved["metadata"]))
     assert header["metadata"]["model_revision"] == "model-commit"
 
 
-def test_ait_das_trains_at_last_token_but_validates_on_all_tokens(
-    monkeypatch, tmp_path
-):
+def test_ait_das_trains_at_last_token_but_validates_on_all_tokens(monkeypatch, tmp_path):
     config = _small_config(tmp_path)
     config.sweep.activation_representation = "last_token"
     positive = TextExample(text="positive", label=1, example_id="positive")
@@ -365,8 +412,7 @@ def test_ait_das_trains_at_last_token_but_validates_on_all_tokens(
             )
 
     monkeypatch.setattr(
-        "sentiment_geometry.experiments.ait_valence.fitting."
-        "DirectionalPatchingEvaluator",
+        "sentiment_geometry.experiments.ait_valence.fitting.DirectionalPatchingEvaluator",
         FakeValidationEvaluator,
     )
     monkeypatch.setattr(
@@ -467,9 +513,7 @@ def test_das_supports_all_non_padding_token_interventions():
             finally:
                 self.editor = None
 
-    result = DASFitter(
-        DASTrainingConfig(epochs=2, batch_size=2, learning_rate=0.01, seed=0)
-    ).fit(
+    result = DASFitter(DASTrainingConfig(epochs=2, batch_size=2, learning_rate=0.01, seed=0)).fit(
         FakeAdapter(),
         pairs,
         layer=1,
@@ -530,23 +574,15 @@ def test_ait_experiment_smoke_writes_and_selects_all_three_methods(
 
     def fake_extract(representation, examples, layer):
         extraction_calls.append((representation, layer))
-        return np.asarray(
-            [[float(row.label), float(layer)] for row in examples]
-        )
+        return np.asarray([[float(row.label), float(layer)] for row in examples])
 
     monkeypatch.setattr(
-        "sentiment_geometry.experiments.ait_valence.experiment."
-        "extract_mean_pooled_activations",
-        lambda adapter, examples, layer, **kwargs: fake_extract(
-            "mean_pool", examples, layer
-        ),
+        "sentiment_geometry.experiments.ait_valence.experiment.extract_mean_pooled_activations",
+        lambda adapter, examples, layer, **kwargs: fake_extract("mean_pool", examples, layer),
     )
     monkeypatch.setattr(
-        "sentiment_geometry.experiments.ait_valence.experiment."
-        "extract_last_token_activations",
-        lambda adapter, examples, layer, **kwargs: fake_extract(
-            "last_token", examples, layer
-        ),
+        "sentiment_geometry.experiments.ait_valence.experiment.extract_last_token_activations",
+        lambda adapter, examples, layer, **kwargs: fake_extract("last_token", examples, layer),
     )
 
     def fake_fit(self, request):
@@ -568,9 +604,7 @@ def test_ait_experiment_smoke_writes_and_selects_all_three_methods(
                 "activation_representation": request.activation_representation,
                 "intervention_position": request.intervention_position,
                 "training_intervention_position": request.intervention_position,
-                "checkpoint_validation_position": (
-                    request.checkpoint_validation_position
-                ),
+                "checkpoint_validation_position": (request.checkpoint_validation_position),
                 "selected_epoch": 1 if request.method == "das" else None,
                 "loss_history": [
                     {
@@ -620,8 +654,7 @@ def test_ait_experiment_smoke_writes_and_selects_all_three_methods(
             )
 
     monkeypatch.setattr(
-        "sentiment_geometry.experiments.ait_valence.experiment."
-        "DirectionalPatchingEvaluator",
+        "sentiment_geometry.experiments.ait_valence.experiment.DirectionalPatchingEvaluator",
         FakeEvaluator,
     )
     experiment = AITValenceDirectionExperiment(
@@ -647,12 +680,8 @@ def test_ait_experiment_smoke_writes_and_selects_all_three_methods(
     assert np.allclose(similarities["absolute_cosine"], 1.0)
     assert set(metrics["representation"]) == expected_representations
     assert set(metrics.loc[metrics["method"] == "das", "patch_position"]) == {"all"}
-    assert set(metrics.loc[metrics["method"] != "das", "patch_position"]) == {
-        linear_patch_position
-    }
-    assert set(metrics["activation_representation"]) == {
-        activation_representation
-    }
+    assert set(metrics.loc[metrics["method"] != "das", "patch_position"]) == {linear_patch_position}
+    assert set(metrics["activation_representation"]) == {activation_representation}
     expected_fit_positions = (
         {"final"} if activation_representation == "last_token" else expected_representations
     )
@@ -673,9 +702,7 @@ def test_ait_experiment_smoke_writes_and_selects_all_three_methods(
     assert set(samples["model"]) == {"gpt2-small"}
     assert set(model_samples["dataset_config"]) == {"gpt2_small_matched_pairs"}
     assert set(dataset_summary["dataset_config"]) == {"gpt2_small_matched_pairs"}
-    assert manifest["model_matched_configs"] == {
-        "gpt2-small": "gpt2_small_matched_pairs"
-    }
+    assert manifest["model_matched_configs"] == {"gpt2-small": "gpt2_small_matched_pairs"}
     assert manifest["requested_train_examples_per_model"] == 5
     assert manifest["requested_eval_directed_cases_per_model"] == 4
     assert manifest["requested_test_directed_cases_per_model"] == 4
@@ -687,3 +714,146 @@ def test_ait_experiment_smoke_writes_and_selects_all_three_methods(
         figures = plot_ait_valence_run(output, figure_dir=tmp_path / "figures")
         assert len(figures) == 5
         assert all(path.is_file() for path in figures)
+
+
+def test_full_ait_experiment_selects_on_validation_then_evaluates_locked_test(
+    monkeypatch, tmp_path
+):
+    config = _small_config(tmp_path)
+    config.sampling = AITSamplingConfig(
+        train_examples=None,
+        eval_directed_cases=None,
+        test_directed_cases=None,
+    )
+    config.selection = AITValenceSelectionConfig(
+        layer_selection_split="eval",
+        final_evaluation_split="test",
+    )
+    config.sweep.layers = [1, 2]
+    config.sweep.methods = ["mean_diff"]
+    rows = {
+        "train": _matched_rows("train", 8),
+        "validation": _matched_rows("validation", 5),
+        "test": _matched_rows("test", 6),
+    }
+
+    def load_rows(repo_id, *, config_name, split, revision, **kwargs):
+        return HuggingFaceRows(rows[split], revision, "resolved-dataset-commit")
+
+    monkeypatch.setattr(
+        "sentiment_geometry.experiments.ait_valence.experiment.extract_mean_pooled_activations",
+        lambda adapter, examples, layer, **kwargs: np.asarray(
+            [[float(row.label), float(layer)] for row in examples]
+        ),
+    )
+
+    def fake_fit(self, request):
+        path = (
+            Path(self.config.sweep.checkpoint_dir)
+            / self.model.name
+            / request.method
+            / f"layer{request.layer:02d}.npz"
+        )
+        artifact = DirectionArtifact(
+            method=request.method,
+            model_name=self.model.hub_name,
+            layer=request.layer,
+            vector=np.asarray([1.0, 0.0]),
+            metadata={
+                "representation": request.representation,
+                "fit_position": request.fit_position,
+                "activation_representation": request.activation_representation,
+                "intervention_position": request.intervention_position,
+                "training_intervention_position": None,
+                "checkpoint_validation_position": None,
+                "loss_history": [],
+            },
+        )
+        artifact.save(path)
+        return FittedAITDirection(artifact, path)
+
+    monkeypatch.setattr(AITDirectionFitService, "fit", fake_fit)
+
+    evaluation_calls = []
+
+    class FakeEvaluator:
+        def __init__(self, adapter, pairs, *, layer, **kwargs):
+            self.layer = layer
+            self.pairs = pairs
+            self.split = pairs[0].clean.metadata["split"]
+            evaluation_calls.append((self.split, layer, len(pairs)))
+
+        def evaluate(self, direction):
+            flip_rate = (0.8 if self.layer == 2 else 0.2) if self.split == "validation" else 0.6
+            return PatchingResult(
+                recovery=flip_rate,
+                flip_rate=flip_rate,
+                sign_flip_rate=flip_rate / 2,
+                corrupted_margin=-1.0,
+                clean_margin=1.0,
+                patched_margin=flip_rate,
+                corrupted_accuracy=0.0,
+                clean_accuracy=1.0,
+                patched_accuracy=flip_rate,
+                n_pairs=len(self.pairs),
+                records=tuple(
+                    {
+                        "clean_id": pair.clean.example_id,
+                        "corrupted_id": pair.corrupted.example_id,
+                    }
+                    for pair in self.pairs
+                ),
+            )
+
+    monkeypatch.setattr(
+        "sentiment_geometry.experiments.ait_valence.experiment.DirectionalPatchingEvaluator",
+        FakeEvaluator,
+    )
+
+    class FakeAdapter:
+        n_layers = 2
+        device_spec = DeviceSpec(torch.device("cpu"), torch.float32)
+
+        @staticmethod
+        def provenance():
+            return {
+                "resolved_model_revision": "model-commit",
+                "resolved_tokenizer_revision": "tokenizer-commit",
+            }
+
+    output = AITValenceDirectionExperiment(
+        config,
+        adapter_factory=lambda *args, **kwargs: FakeAdapter(),
+        dataset_loader=AITDatasetLoader(config, rows_loader=load_rows),
+    ).run()
+
+    metrics = pd.read_csv(output / "gpt2-small" / "metrics.csv")
+    final_metrics = pd.read_csv(output / "gpt2-small" / "final_metrics.csv")
+    selected_metrics = pd.read_csv(output / "gpt2-small" / "selected_metrics.csv")
+    selection = pd.read_csv(output / "gpt2-small" / "layer_selection.csv")
+    summary = pd.read_csv(output / "gpt2-small" / "dataset_summary.csv")
+    manifest = json.loads((output / "experiment_manifest.json").read_text())
+
+    assert evaluation_calls == [
+        ("validation", 1, 10),
+        ("validation", 2, 10),
+        ("test", 2, 12),
+    ]
+    assert metrics["phase"].tolist() == [
+        "layer_selection",
+        "layer_selection",
+        "final_evaluation",
+    ]
+    assert selection.loc[0, "selection_dataset"] == "ait_eval"
+    assert selection.loc[0, "selected_layer"] == 2
+    assert set(final_metrics["dataset"]) == {"ait_test"}
+    assert set(final_metrics["phase"]) == {"final_evaluation"}
+    assert selected_metrics.equals(final_metrics)
+    assert summary.loc[summary["source_split"] == "validation", "role"].item() == (
+        "das_checkpoint_validation+layer_selection"
+    )
+    assert summary.loc[summary["source_split"] == "test", "role"].item() == ("final_evaluation")
+    assert manifest["sampling_uses_all_available"] is True
+    assert manifest["layer_selection_role"] == "eval"
+    assert manifest["final_evaluation_role"] == "test"
+    assert manifest["test_is_locked_final_evaluation"] is True

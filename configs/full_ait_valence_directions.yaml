@@ -1,0 +1,80 @@
+seed: 0
+
+models:
+  - name: gpt2-small
+    revision: 607a30d783dfa663caf39e06633721c8d4cfcd7e
+    prepend_bos: true
+    device: auto
+    dtype: auto
+    batch_size: 16
+  - name: qwen-0.6b
+    revision: da87bfb608c14b7cf20ba1ce41287e8de496c0cd
+    prepend_bos: false
+    device: auto
+    dtype: auto
+    batch_size: 8
+  - name: gemma-2b
+    revision: null  # Pin an immutable model commit before a reportable run.
+    prepend_bos: true
+    device: auto
+    dtype: auto
+    batch_size: 4
+  - name: pythia-1.4b
+    revision: null  # Pin an immutable model commit before a reportable run.
+    prepend_bos: true
+    device: auto
+    dtype: auto
+    batch_size: 8
+
+data:
+  repo_id: kokolamba/sentiment-manifold-ait-valence-binary
+  revision: c53df7c117c2f433df904cfaeddb9062027f755f
+  model_matched_configs:
+    gpt2-small: gpt2_small_matched_pairs
+    qwen-0.6b: qwen_0_6b_matched_pairs
+    gemma-2b: gemma_2b_matched_pairs
+    pythia-1.4b: pythia_1_4b_matched_pairs
+  train_split: train
+  eval_split: validation
+  test_split: test
+  hf_token_env: HF_TOKEN
+  positive_answers: [" Positive"]
+  negative_answers: [" Negative"]
+
+# Null caps consume every matched pair available in each model-specific split.
+sampling:
+  train_examples: null
+  eval_directed_cases: null
+  test_directed_cases: null
+
+sweep:
+  layers: all_non_embedding
+  methods: [mean_diff, logistic_regression, das]
+  activation_representation: last_token
+  output_dir: outputs/full-ait-valence-directions
+  checkpoint_dir: checkpoints/full-ait-valence-directions
+  resume: true
+  include_special_tokens_in_mean_pool: false
+
+selection:
+  # Validation selects the DAS epoch at each layer and the best layer for every method.
+  das_checkpoint_split: eval
+  das_checkpoint_metric: validation_loss
+  layer_selection_split: eval
+  layer_selection_metric: logit_flip_percent
+  # Test remains locked until the method-specific layer has been selected.
+  final_evaluation_split: test
+
+fitting:
+  logistic_c: 1.0
+  logistic_solver: liblinear
+  logistic_max_iter: 1000
+  logistic_tol: 0.0001
+
+das:
+  epochs: 64
+  learning_rate: 0.001
+  weight_decay: 0.0
+  batch_size: 8
+  max_grad_norm: 1.0
+  implementation: tigges_rotation

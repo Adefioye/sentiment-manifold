@@ -28,9 +28,7 @@ def _default_model_matched_configs() -> dict[str, str]:
 class AITDataConfig:
     repo_id: str = "kokolamba/sentiment-manifold-ait-valence-binary"
     revision: str | None = None
-    model_matched_configs: dict[str, str] = field(
-        default_factory=_default_model_matched_configs
-    )
+    model_matched_configs: dict[str, str] = field(default_factory=_default_model_matched_configs)
     train_split: str = "train"
     eval_split: str = "validation"
     test_split: str = "test"
@@ -53,9 +51,22 @@ class AITDataConfig:
 
 @dataclass
 class AITSamplingConfig:
-    train_examples: int = 55
-    eval_directed_cases: int = 30
-    test_directed_cases: int = 30
+    """Optional per-role caps; ``None`` consumes every available matched pair."""
+
+    train_examples: int | None = 55
+    eval_directed_cases: int | None = 30
+    test_directed_cases: int | None = 30
+
+    @property
+    def uses_all_available(self) -> bool:
+        return all(
+            value is None
+            for value in (
+                self.train_examples,
+                self.eval_directed_cases,
+                self.test_directed_cases,
+            )
+        )
 
 
 @dataclass
@@ -75,6 +86,7 @@ class AITValenceSelectionConfig:
     das_checkpoint_metric: str = "validation_loss"
     layer_selection_split: str = "test"
     layer_selection_metric: str = "logit_flip_percent"
+    final_evaluation_split: str | None = None
 
 
 @dataclass
@@ -123,9 +135,7 @@ class AITValenceExperimentConfig:
         if not self.data.repo_id:
             raise ValueError("AIT repository is required")
         missing_pair_configs = [
-            name
-            for name in model_names
-            if not self.data.model_matched_configs.get(name)
+            name for name in model_names if not self.data.model_matched_configs.get(name)
         ]
         if missing_pair_configs:
             raise ValueError(
@@ -137,10 +147,13 @@ class AITValenceExperimentConfig:
             raise ValueError("AIT train, eval, and test source splits must be distinct")
         if not self.data.positive_answers or not self.data.negative_answers:
             raise ValueError("Positive and negative answer tokens must both be configured")
-        if self.sampling.train_examples < 2:
+        if self.sampling.train_examples is not None and self.sampling.train_examples < 2:
             raise ValueError("AIT training requires at least two examples")
         for name in ("eval_directed_cases", "test_directed_cases"):
-            value = int(getattr(self.sampling, name))
+            configured = getattr(self.sampling, name)
+            if configured is None:
+                continue
+            value = int(configured)
             if value < 2 or value % 2:
                 raise ValueError(f"{name} must be a positive even number")
         if not self.sweep.methods:
@@ -150,10 +163,7 @@ class AITValenceExperimentConfig:
         unknown = sorted(set(self.sweep.methods) - set(SUPPORTED_AIT_METHODS))
         if unknown:
             raise ValueError(f"Unsupported AIT fitting methods: {unknown}")
-        if (
-            self.sweep.activation_representation
-            not in SUPPORTED_AIT_ACTIVATION_REPRESENTATIONS
-        ):
+        if self.sweep.activation_representation not in SUPPORTED_AIT_ACTIVATION_REPRESENTATIONS:
             raise ValueError(
                 "AIT activation_representation must be one of "
                 f"{SUPPORTED_AIT_ACTIVATION_REPRESENTATIONS}"
@@ -162,10 +172,15 @@ class AITValenceExperimentConfig:
             raise ValueError("DAS checkpoints must be selected on the AIT eval role")
         if self.selection.das_checkpoint_metric != "validation_loss":
             raise ValueError("DAS checkpoint metric must be 'validation_loss'")
-        if self.selection.layer_selection_split != "test":
-            raise ValueError("AIT layers must be selected on the disjoint test role")
+        if self.selection.layer_selection_split not in {"eval", "test"}:
+            raise ValueError("AIT layer_selection_split must be 'eval' or 'test'")
         if self.selection.layer_selection_metric != "logit_flip_percent":
             raise ValueError("AIT layer-selection metric must be 'logit_flip_percent'")
+        final_split = self.selection.final_evaluation_split
+        if final_split not in {None, "eval", "test"}:
+            raise ValueError("AIT final_evaluation_split must be null, 'eval', or 'test'")
+        if final_split == self.selection.layer_selection_split:
+            raise ValueError("AIT final evaluation must be disjoint from layer selection")
         if self.das.implementation != "tigges_rotation":
             raise ValueError("AIT DAS requires das.implementation=tigges_rotation")
 

@@ -1,5 +1,6 @@
 """Publication-facing result selection, tables, and plots."""
 
+from .ait_valence import plot_ait_valence_run
 from .sentiment_position import (
     DATASET_ORDER,
     MODEL_ORDER,
@@ -19,6 +20,7 @@ __all__ = [
     "DATASET_ORDER",
     "MODEL_ORDER",
     "SentimentPositionReportData",
+    "plot_ait_valence_run",
     "plot_cosine_similarity_grid",
     "plot_cross_position_cosines",
     "plot_logit_difference_grid",

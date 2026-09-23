@@ -239,5 +239,12 @@ Private Hub authentication is read from `HF_TOKEN` by default, or from the file 
 The output root contains immutable sample/pair manifests, a dataset summary, requested and resolved
 configuration, combined CSVs, and an experiment manifest. Each model directory contains resumable
 direction checkpoints plus `metrics.csv`, `patching_records.csv`, `direction_metadata.csv`,
-`das_epoch_metrics.csv`, `layer_selection.csv`, and `selected_metrics.csv`. A future Colab notebook
-should only set runtime paths and credentials, invoke this API, and display the saved tables.
+`das_epoch_metrics.csv`, `direction_similarities.csv`, `layer_selection.csv`, and
+`selected_metrics.csv`.
+
+The executable
+[`06_colab_train_ait_last_token_directions.ipynb`](../../notebooks/06_colab_train_ait_last_token_directions.ipynb)
+runs GPT-2 Small and Qwen 0.6B through the `--last-token` CLI path. It writes checkpoints and all
+CSV artifacts to a date-stamped Google Drive run, saves first/middle/last pairwise direction
+similarities, renders layer-metric and absolute-cosine plots, and removes the Hugging Face token
+from notebook memory immediately after training.

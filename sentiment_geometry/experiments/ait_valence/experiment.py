@@ -17,7 +17,11 @@ from ...activations import (
 from ...evaluation import DirectionalPatchingEvaluator
 from ...models import CausalLMAdapter, ModelConfig, clear_device_cache, resolve_device
 from ...persistence import RunArtifactStore
-from ..sentiment_position.results import select_layers_by_validation_metric
+from ..sentiment_position.config import comparison_boundaries
+from ..sentiment_position.results import (
+    direction_similarity_rows,
+    select_layers_by_validation_metric,
+)
 from .config import AITValenceExperimentConfig
 from .datasets import AITDatasetLoader, PreparedAITData
 from .fitting import AITDirectionFitRequest, AITDirectionFitService, FittedAITDirection
@@ -91,6 +95,7 @@ class AITValenceDirectionExperiment:
             "patching_records": [],
             "direction_metadata": [],
             "das_epoch_metrics": [],
+            "direction_similarities": [],
             "layer_selection": [],
             "selected_metrics": [],
         }
@@ -150,6 +155,8 @@ class AITValenceDirectionExperiment:
             }
         )
         layers = self.config.layers_for(adapter.n_layers)
+        snapshot_layers = set(comparison_boundaries(adapter.n_layers))
+        runtime["comparison_boundaries"] = sorted(snapshot_layers)
         labels = np.asarray([example.label for example in data.train_examples])
         fit_service = AITDirectionFitService(
             config=self.config,
@@ -162,6 +169,7 @@ class AITValenceDirectionExperiment:
             "patching_records": [],
             "direction_metadata": [],
             "das_epoch_metrics": [],
+            "direction_similarities": [],
             "layer_selection": [],
             "selected_metrics": [],
         }
@@ -186,6 +194,7 @@ class AITValenceDirectionExperiment:
                     batch_size=model.batch_size,
                 )
             evaluators: dict[str, DirectionalPatchingEvaluator] = {}
+            directions_at_layer: dict[tuple[str, str], np.ndarray] = {}
             for method in self.config.sweep.methods:
                 patch_position = (
                     "all" if method == "das" else self.config.intervention_position()
@@ -219,6 +228,7 @@ class AITValenceDirectionExperiment:
                 fitted[(layer, method)] = trained
                 representation = str(trained.artifact.metadata["representation"])
                 fit_position = str(trained.artifact.metadata["fit_position"])
+                directions_at_layer[(fit_position, method)] = trained.artifact.vector
                 result = evaluator.evaluate(trained.artifact.vector)
                 tables["metrics"].append(
                     _metric_row(
@@ -309,6 +319,14 @@ class AITValenceDirectionExperiment:
                             **epoch_row,
                         }
                     )
+            if layer in snapshot_layers:
+                tables["direction_similarities"].extend(
+                    direction_similarity_rows(
+                        model=model.name,
+                        layer=layer,
+                        directions=directions_at_layer,
+                    )
+                )
             self._flush(store, tables)
             clear_device_cache(device_spec.device)
 

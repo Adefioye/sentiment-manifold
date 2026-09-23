@@ -34,6 +34,7 @@ from sentiment_geometry.fitting_methods.base import FitResult
 from sentiment_geometry.fitting_methods.das import DASFitter, DASTrainingConfig
 from sentiment_geometry.models import ModelConfig, TokenizedBatch
 from sentiment_geometry.models.devices import DeviceSpec
+from sentiment_geometry.reporting import plot_ait_valence_run
 
 PROJECT_ROOT = Path(__file__).parents[1]
 
@@ -519,9 +520,9 @@ def test_ait_experiment_smoke_writes_and_selects_all_three_methods(
             model_name=self.model.hub_name,
             layer=request.layer,
             vector=np.asarray([1.0, 0.0]),
-                metadata={
-                    "representation": representation,
-                    "fit_position": request.fit_position,
+            metadata={
+                "representation": representation,
+                "fit_position": request.fit_position,
                 "activation_representation": request.activation_representation,
                 "intervention_position": request.intervention_position,
                 "training_intervention_position": request.intervention_position,
@@ -592,9 +593,13 @@ def test_ait_experiment_smoke_writes_and_selects_all_three_methods(
     metrics = pd.read_csv(output / "gpt2-small" / "metrics.csv")
     selection = pd.read_csv(output / "gpt2-small" / "layer_selection.csv")
     combined = pd.read_csv(output / "all_models_metrics.csv")
+    similarities = pd.read_csv(output / "all_models_direction_similarities.csv")
     manifest = json.loads((output / "experiment_manifest.json").read_text())
     assert len(metrics) == 6
     assert len(combined) == 6
+    assert len(similarities) == 18
+    assert set(similarities["layer"]) == {1, 2}
+    assert np.allclose(similarities["absolute_cosine"], 1.0)
     assert set(metrics["representation"]) == expected_representations
     assert set(metrics.loc[metrics["method"] == "das", "patch_position"]) == {"all"}
     assert set(metrics.loc[metrics["method"] != "das", "patch_position"]) == {
@@ -624,3 +629,7 @@ def test_ait_experiment_smoke_writes_and_selects_all_three_methods(
     assert manifest["eval_directed_cases"] == 4
     assert manifest["test_directed_cases"] == 4
     assert manifest["test_is_layer_selection_not_final_evaluation"] is True
+    if activation_representation == "last_token":
+        figures = plot_ait_valence_run(output, figure_dir=tmp_path / "figures")
+        assert len(figures) == 5
+        assert all(path.is_file() for path in figures)

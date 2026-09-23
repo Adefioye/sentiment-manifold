@@ -28,6 +28,8 @@ sentiment-geometry train-ait-valence --config configs/ait_valence_directions.yam
 ```
 
 Choose the AIT representation explicitly with `--mean-pool` or `--last-token`.
+The Colab workflow for the complete last-token run is
+[`notebooks/06_colab_train_ait_last_token_directions.ipynb`](notebooks/06_colab_train_ait_last_token_directions.ipynb).
 
 Model aliases are `gpt2-small`, `qwen-0.6b`, `gemma-2b`, and `pythia-1.4b`. Commands support CUDA,
 MPS, and CPU through `--device auto`, `cuda`, `mps`, or `cpu`.

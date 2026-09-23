@@ -29,6 +29,12 @@ def test_ait_last_token_notebook_locks_training_and_drive_artifacts():
         'METHODS = ["mean_diff", "logistic_regression", "das"]',
         'experiment_name="ait-last-token-directions"',
         "all_models_direction_similarities.csv",
+        "all_models_final_metrics.csv",
+        "all_models_final_patching_records.csv",
+        'values="logit_flip_percent"',
+        'values="sign_flip_percent"',
+        '"Locked-test logit flip percent"',
+        '"Locked-test sign flip percent"',
         "snapshot_similarity_summary.csv",
         "plot_ait_valence_run",
         "RUN_LAYOUT.directions_dir",
@@ -37,6 +43,9 @@ def test_ait_last_token_notebook_locks_training_and_drive_artifacts():
         '"qwen-0.6b": "qwen_0_6b_matched_pairs"',
         'dataset_summary.groupby("model")["dataset_config"]',
         "required_model_files",
+        '"layer_selection_role": "eval"',
+        '"final_evaluation_role": "test"',
+        '"test_is_unbiased_final_evaluation": True',
     ):
         assert required in source
     assert 'MODEL_NAMES = [\n    "gpt2-small",\n    "qwen-0.6b",\n]' in source

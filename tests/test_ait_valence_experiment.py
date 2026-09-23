@@ -93,8 +93,8 @@ def test_ait_config_loads_separate_reproducible_contract():
     assert config.sweep.methods == ["mean_diff", "logistic_regression", "das"]
     assert config.sweep.activation_representation == "mean_pool"
     assert config.selection.das_checkpoint_split == "eval"
-    assert config.selection.layer_selection_split == "test"
-    assert config.selection.final_evaluation_split is None
+    assert config.selection.layer_selection_split == "eval"
+    assert config.selection.final_evaluation_split == "test"
 
 
 def test_full_ait_config_uses_all_model_specific_splits_and_locks_test():
@@ -848,6 +848,9 @@ def test_full_ait_experiment_selects_on_validation_then_evaluates_locked_test(
     assert selection.loc[0, "selected_layer"] == 2
     assert set(final_metrics["dataset"]) == {"ait_test"}
     assert set(final_metrics["phase"]) == {"final_evaluation"}
+    assert {"logit_flip_percent", "sign_flip_percent"} <= set(final_metrics.columns)
+    assert final_metrics.loc[0, "logit_flip_percent"] == pytest.approx(60.0)
+    assert final_metrics.loc[0, "sign_flip_percent"] == pytest.approx(30.0)
     assert selected_metrics.equals(final_metrics)
     assert summary.loc[summary["source_split"] == "validation", "role"].item() == (
         "das_checkpoint_validation+layer_selection"

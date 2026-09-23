@@ -199,9 +199,9 @@ contains 321/99/273 train/validation/test pairs for GPT-2 Small, 323/118/274 for
 Mean difference and logistic regression fit masked mean-pooled residual activations over all
 non-padding, non-special prompt tokens. One-dimensional DAS retains causal training semantics: it
 uses the directed train pairs and patches all non-padding token positions. At every layer, the DAS
-epoch is selected by eval-set validation loss. The disjoint AIT test role then selects one layer per
-method using `logit_flip_percent`; because it performs selection, it is not treated as an unbiased
-final evaluation set.
+epoch is selected by eval-set validation loss. The same validation role selects one layer per
+method using `logit_flip_percent`. The disjoint test role is evaluated only after those choices are
+frozen, so its metrics are retained as the final in-distribution evaluation.
 
 The activation representation can be selected explicitly at the CLI:
 
@@ -210,7 +210,7 @@ The activation representation can be selected explicitly at the CLI:
   DAS is never trained on a pooled vector.
 - `--last-token` fits mean difference and logistic regression from each prompt's final non-padding
   token. DAS trains at that final-token position, but its eval-set checkpoint validation and
-  test-role layer-selection evaluation patch all tokens, matching the sentiment-position protocol.
+  eval-role layer-selection evaluation patch all tokens, matching the sentiment-position protocol.
 
 The selected mode is stored in every resolved configuration, checkpoint fingerprint, experiment
 manifest, direction-metadata table, and metric table, preventing the two representations from being

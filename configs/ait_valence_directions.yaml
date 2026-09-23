@@ -57,12 +57,13 @@ sweep:
   include_special_tokens_in_mean_pool: false
 
 selection:
-  # Eval is used only to select the DAS epoch at each layer.
+  # Validation selects the DAS epoch at each layer and the best layer for every method.
   das_checkpoint_split: eval
   das_checkpoint_metric: validation_loss
-  # Test is a disjoint layer-selection set, not an unbiased final evaluation.
-  layer_selection_split: test
+  layer_selection_split: eval
   layer_selection_metric: logit_flip_percent
+  # Test remains locked until the method-specific layer has been selected.
+  final_evaluation_split: test
 
 fitting:
   logistic_c: 1.0

@@ -107,6 +107,8 @@ def test_full_ait_config_uses_all_model_specific_splits_and_locks_test():
     assert config.sampling.eval_directed_cases is None
     assert config.sampling.test_directed_cases is None
     assert config.sweep.activation_representation == "last_token"
+    assert next(model for model in config.models if model.name == "qwen-0.6b").batch_size == 16
+    assert config.das.batch_size == 16
     assert config.selection.das_checkpoint_split == "eval"
     assert config.selection.layer_selection_split == "eval"
     assert config.selection.final_evaluation_split == "test"

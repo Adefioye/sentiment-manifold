@@ -12,7 +12,7 @@ models:
     prepend_bos: false
     device: auto
     dtype: auto
-    batch_size: 8
+    batch_size: 16
   - name: gemma-2b
     revision: null  # Pin an immutable model commit before a reportable run.
     prepend_bos: true
@@ -75,6 +75,6 @@ das:
   epochs: 64
   learning_rate: 0.001
   weight_decay: 0.0
-  batch_size: 8
+  batch_size: 16
   max_grad_norm: 1.0
   implementation: tigges_rotation

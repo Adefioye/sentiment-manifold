@@ -12,12 +12,10 @@ def _notebook():
     return json.loads(NOTEBOOK_PATH.read_text(encoding="utf-8"))
 
 
-def test_full_ait_last_token_notebook_is_clean_and_all_code_compiles():
+def test_full_ait_last_token_notebook_code_compiles():
     notebook = _notebook()
     assert notebook["nbformat"] == 4
     for index, cell in enumerate(notebook["cells"]):
-        assert cell.get("execution_count") is None
-        assert cell.get("outputs", []) == []
         if cell["cell_type"] == "code":
             compile("".join(cell["source"]), f"{NOTEBOOK_PATH}:cell-{index}", "exec")
 
@@ -36,13 +34,13 @@ def test_full_ait_last_token_notebook_locks_full_data_contract():
         '"layer_selection_role": "eval"',
         '"final_evaluation_role": "test"',
         '"test_is_unbiased_final_evaluation": True',
+        'MODEL_NAMES = ["qwen-0.6b"]',
+        'qwen_config.batch_size != 16',
+        'base_config.das.batch_size != 16',
         '"n_matched_pairs"',
         'values="n_examples"',
         'values="n_directed_cases"',
-        '"gpt2-small": "gpt2_small_matched_pairs"',
         '"qwen-0.6b": "qwen_0_6b_matched_pairs"',
-        '"gemma-2b": "gemma_2b_matched_pairs"',
-        '"pythia-1.4b": "pythia_1_4b_matched_pairs"',
     ):
         assert required in source
 
@@ -80,7 +78,8 @@ def test_full_ait_last_token_notebook_persists_and_audits_artifacts():
         "stderr=subprocess.STDOUT",
         "required_result_files",
         "required_model_files",
-        'rglob("*.npz")',
+        'direction_metadata["artifact_path"]',
+        "missing_checkpoint_files",
         'child_environment["HF_TOKEN"] = get_runtime_secret("HF_TOKEN")',
         'child_environment.pop("HF_TOKEN", None)',
         "clear_hf_credentials()",

@@ -49,3 +49,15 @@ def test_ait_last_token_notebook_passes_then_clears_hf_token():
     assert "clear_hf_credentials()" in source
     assert 'if os.environ.get("HF_TOKEN") is not None' in source
     assert 'if "HF_TOKEN" in _RUNTIME_SECRETS' in source
+
+
+def test_ait_last_token_notebook_streams_and_persists_cli_failures():
+    source = "\n".join(
+        "".join(cell.get("source", [])) for cell in _notebook()["cells"]
+    )
+    assert 'training_log_path = RUN_LAYOUT.root / "training.log"' in source
+    assert "stdout=subprocess.PIPE" in source
+    assert "stderr=subprocess.STDOUT" in source
+    assert 'print(line, end="", flush=True)' in source
+    assert '"training_log": str(training_log_path)' in source
+    assert 'failure_metadata["exit_code"] = error.returncode' in source

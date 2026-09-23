@@ -29,7 +29,11 @@ models:
 data:
   repo_id: kokolamba/sentiment-manifold-ait-valence-binary
   revision: c53df7c117c2f433df904cfaeddb9062027f755f
-  matched_config: common_matched_pairs
+  model_matched_configs:
+    gpt2-small: gpt2_small_matched_pairs
+    qwen-0.6b: qwen_0_6b_matched_pairs
+    gemma-2b: gemma_2b_matched_pairs
+    pythia-1.4b: pythia_1_4b_matched_pairs
   train_split: train
   eval_split: validation
   test_split: test

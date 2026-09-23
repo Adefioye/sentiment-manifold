@@ -15,11 +15,22 @@ SUPPORTED_AIT_METHODS = ("mean_diff", "logistic_regression", "das")
 SUPPORTED_AIT_ACTIVATION_REPRESENTATIONS = ("mean_pool", "last_token")
 
 
+def _default_model_matched_configs() -> dict[str, str]:
+    return {
+        "gpt2-small": "gpt2_small_matched_pairs",
+        "qwen-0.6b": "qwen_0_6b_matched_pairs",
+        "gemma-2b": "gemma_2b_matched_pairs",
+        "pythia-1.4b": "pythia_1_4b_matched_pairs",
+    }
+
+
 @dataclass
 class AITDataConfig:
     repo_id: str = "kokolamba/sentiment-manifold-ait-valence-binary"
     revision: str | None = None
-    matched_config: str = "common_matched_pairs"
+    model_matched_configs: dict[str, str] = field(
+        default_factory=_default_model_matched_configs
+    )
     train_split: str = "train"
     eval_split: str = "validation"
     test_split: str = "test"
@@ -30,6 +41,14 @@ class AITDataConfig:
     @property
     def answers(self) -> dict[int, tuple[str, ...]]:
         return {1: tuple(self.positive_answers), 0: tuple(self.negative_answers)}
+
+    def matched_config_for(self, model_name: str) -> str:
+        try:
+            return self.model_matched_configs[model_name]
+        except KeyError as exc:
+            raise ValueError(
+                f"No AIT matched-pair configuration is defined for model {model_name!r}"
+            ) from exc
 
 
 @dataclass
@@ -101,8 +120,18 @@ class AITValenceExperimentConfig:
         model_names = [model.name for model in self.models]
         if len(model_names) != len(set(model_names)):
             raise ValueError("Configured model names must be unique")
-        if not self.data.repo_id or not self.data.matched_config:
-            raise ValueError("AIT repository and matched-pair configuration are required")
+        if not self.data.repo_id:
+            raise ValueError("AIT repository is required")
+        missing_pair_configs = [
+            name
+            for name in model_names
+            if not self.data.model_matched_configs.get(name)
+        ]
+        if missing_pair_configs:
+            raise ValueError(
+                "AIT model-specific matched-pair configurations are required for "
+                f"{missing_pair_configs}"
+            )
         splits = [self.data.train_split, self.data.eval_split, self.data.test_split]
         if len(set(splits)) != 3:
             raise ValueError("AIT train, eval, and test source splits must be distinct")

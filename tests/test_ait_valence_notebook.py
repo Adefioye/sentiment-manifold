@@ -33,6 +33,10 @@ def test_ait_last_token_notebook_locks_training_and_drive_artifacts():
         "plot_ait_valence_run",
         "RUN_LAYOUT.directions_dir",
         "RUN_LAYOUT.figures_dir",
+        '"gpt2-small": "gpt2_small_matched_pairs"',
+        '"qwen-0.6b": "qwen_0_6b_matched_pairs"',
+        'dataset_summary.groupby("model")["dataset_config"]',
+        "required_model_files",
     ):
         assert required in source
     assert 'MODEL_NAMES = [\n    "gpt2-small",\n    "qwen-0.6b",\n]' in source

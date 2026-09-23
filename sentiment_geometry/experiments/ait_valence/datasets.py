@@ -17,6 +17,8 @@ RowsLoader = Callable[..., HuggingFaceRows]
 
 @dataclass(frozen=True)
 class PreparedAITData:
+    model_name: str
+    dataset_config: str
     train_examples: tuple[TextExample, ...]
     train_pairs: tuple[CounterfactualPair, ...]
     eval_pairs: tuple[CounterfactualPair, ...]
@@ -146,11 +148,13 @@ def _sample_matches(
     count: int,
     split: str,
     seed: int,
+    config_name: str,
 ) -> tuple[Mapping[str, Any], ...]:
     ordered = sorted(rows, key=lambda row: str(row["pair_id"]))
     if len(ordered) < count:
         raise RuntimeError(
-            f"AIT {split!r} has {len(ordered)} common matches, but {count} are required"
+            f"AIT configuration {config_name!r} split {split!r} has "
+            f"{len(ordered)} matched pairs, but {count} are required"
         )
     rng = random.Random(seed)
     rng.shuffle(ordered)
@@ -163,10 +167,17 @@ def _sample_rows(
     split: str,
     count: int,
     seed: int,
+    config_name: str,
 ) -> tuple[Mapping[str, Any], ...]:
     for row in loaded.rows:
         _validate_match(row, split=split)
-    return _sample_matches(loaded.rows, count=count, split=split, seed=seed)
+    return _sample_matches(
+        loaded.rows,
+        count=count,
+        split=split,
+        seed=seed,
+        config_name=config_name,
+    )
 
 
 class AITDatasetLoader:
@@ -181,14 +192,15 @@ class AITDatasetLoader:
         self.config = config
         self.rows_loader = rows_loader
 
-    def load(self) -> PreparedAITData:
+    def load(self, model_name: str) -> PreparedAITData:
         data = self.config.data
         sampling = self.config.sampling
+        config_name = data.matched_config_for(model_name)
         token = _token_from_environment(data.hf_token_env)
         loaded_by_role = {
             role: self.rows_loader(
                 data.repo_id,
-                config_name=data.matched_config,
+                config_name=config_name,
                 split=split,
                 revision=data.revision,
                 token=token,
@@ -210,6 +222,7 @@ class AITDatasetLoader:
             split=data.train_split,
             count=train_match_count,
             seed=self.config.seed,
+            config_name=config_name,
         )
         complete_train_matches = selected_train[: sampling.train_examples // 2]
         train_pairs = _directed_pairs(
@@ -217,7 +230,7 @@ class AITDatasetLoader:
             split=data.train_split,
             role="train",
             repo_id=data.repo_id,
-            config_name=data.matched_config,
+            config_name=config_name,
             revision=resolved_revision,
         )
         train_examples: list[TextExample] = []
@@ -230,7 +243,7 @@ class AITDatasetLoader:
                         split=data.train_split,
                         role="train",
                         repo_id=data.repo_id,
-                        config_name=data.matched_config,
+                        config_name=config_name,
                         revision=resolved_revision,
                     )
                     for polarity in ("positive", "negative")
@@ -244,7 +257,7 @@ class AITDatasetLoader:
                     split=data.train_split,
                     role="train",
                     repo_id=data.repo_id,
-                    config_name=data.matched_config,
+                    config_name=config_name,
                     revision=resolved_revision,
                 )
             )
@@ -254,19 +267,21 @@ class AITDatasetLoader:
             split=data.eval_split,
             count=sampling.eval_directed_cases // 2,
             seed=self.config.seed + 1,
+            config_name=config_name,
         )
         selected_test = _sample_rows(
             loaded_by_role["test"],
             split=data.test_split,
             count=sampling.test_directed_cases // 2,
             seed=self.config.seed + 2,
+            config_name=config_name,
         )
         eval_pairs = _directed_pairs(
             selected_eval,
             split=data.eval_split,
             role="das_checkpoint_validation",
             repo_id=data.repo_id,
-            config_name=data.matched_config,
+            config_name=config_name,
             revision=resolved_revision,
         )
         test_pairs = _directed_pairs(
@@ -274,7 +289,7 @@ class AITDatasetLoader:
             split=data.test_split,
             role="layer_selection",
             repo_id=data.repo_id,
-            config_name=data.matched_config,
+            config_name=config_name,
             revision=resolved_revision,
         )
 
@@ -303,6 +318,8 @@ class AITDatasetLoader:
         }
         sample_rows = [
             {
+                "model": model_name,
+                "dataset_config": config_name,
                 "role": "train",
                 "source_split": data.train_split,
                 "example_id": example.example_id,
@@ -324,6 +341,8 @@ class AITDatasetLoader:
             }
             sample_rows.extend(
                 {
+                    "model": model_name,
+                    "dataset_config": config_name,
                     "role": role,
                     "source_split": example.metadata["split"],
                     "example_id": example.example_id,
@@ -342,6 +361,8 @@ class AITDatasetLoader:
         sample_manifest = tuple(sample_rows)
         pair_manifest = tuple(
             {
+                "model": model_name,
+                "dataset_config": config_name,
                 "role": role,
                 "source_split": pair.clean.metadata["split"],
                 "case_id": pair.clean.metadata["case_id"],
@@ -360,6 +381,8 @@ class AITDatasetLoader:
             for pair in pairs
         )
         return PreparedAITData(
+            model_name=model_name,
+            dataset_config=config_name,
             train_examples=tuple(train_examples),
             train_pairs=train_pairs,
             eval_pairs=eval_pairs,

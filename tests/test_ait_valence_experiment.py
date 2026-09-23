@@ -84,7 +84,12 @@ def test_ait_config_loads_separate_reproducible_contract():
     assert config.sampling.train_examples == 55
     assert config.sampling.eval_directed_cases == 30
     assert config.sampling.test_directed_cases == 30
-    assert config.data.matched_config == "common_matched_pairs"
+    assert config.data.model_matched_configs == {
+        "gpt2-small": "gpt2_small_matched_pairs",
+        "qwen-0.6b": "qwen_0_6b_matched_pairs",
+        "gemma-2b": "gemma_2b_matched_pairs",
+        "pythia-1.4b": "pythia_1_4b_matched_pairs",
+    }
     assert config.data.revision == "c53df7c117c2f433df904cfaeddb9062027f755f"
     assert config.sweep.methods == ["mean_diff", "logistic_regression", "das"]
     assert config.sweep.activation_representation == "mean_pool"
@@ -100,14 +105,17 @@ def test_ait_loader_builds_deterministic_disjoint_roles(tmp_path):
         "test": _matched_rows("test", 5),
     }
 
-    def load_rows(repo_id, *, split, revision, **kwargs):
+    def load_rows(repo_id, *, config_name, split, revision, **kwargs):
         assert repo_id == config.data.repo_id
         assert revision == "dataset-commit"
+        assert config_name == "gpt2_small_matched_pairs"
         return HuggingFaceRows(rows[split], revision, "resolved-dataset-commit")
 
-    first = AITDatasetLoader(config, rows_loader=load_rows).load()
-    second = AITDatasetLoader(config, rows_loader=load_rows).load()
+    first = AITDatasetLoader(config, rows_loader=load_rows).load("gpt2-small")
+    second = AITDatasetLoader(config, rows_loader=load_rows).load("gpt2-small")
 
+    assert first.model_name == "gpt2-small"
+    assert first.dataset_config == "gpt2_small_matched_pairs"
     assert len(first.train_examples) == 5
     assert len(first.train_pairs) == 4
     assert len(first.eval_pairs) == 4
@@ -132,12 +140,45 @@ def test_ait_loader_builds_deterministic_disjoint_roles(tmp_path):
     assert not (role_ids["train"] & role_ids["test"])
     assert not (role_ids["eval"] & role_ids["test"])
     assert {row["role"] for row in first.sample_manifest} == {"train", "eval", "test"}
+    assert {row["model"] for row in first.sample_manifest} == {"gpt2-small"}
+    assert {row["dataset_config"] for row in first.sample_manifest} == {
+        "gpt2_small_matched_pairs"
+    }
     assert sum(row["used_by_das_training"] for row in first.sample_manifest) == 4
     assert sum(
         row["used_for_das_checkpoint_validation"] for row in first.sample_manifest
     ) == 4
     assert sum(row["used_for_layer_selection"] for row in first.sample_manifest) == 4
     assert {row["role"] for row in first.pair_manifest} == {"train", "eval", "test"}
+    assert {row["model"] for row in first.pair_manifest} == {"gpt2-small"}
+
+
+def test_ait_loader_selects_the_model_specific_pair_configuration(tmp_path):
+    config = _small_config(tmp_path)
+    rows = {
+        "train": _matched_rows("train", 8),
+        "validation": _matched_rows("validation", 5),
+        "test": _matched_rows("test", 5),
+    }
+    observed_configs = []
+
+    def load_rows(repo_id, *, config_name, split, revision, **kwargs):
+        observed_configs.append(config_name)
+        return HuggingFaceRows(rows[split], revision, "resolved-dataset-commit")
+
+    prepared = AITDatasetLoader(config, rows_loader=load_rows).load("qwen-0.6b")
+
+    assert observed_configs == ["qwen_0_6b_matched_pairs"] * 3
+    assert prepared.model_name == "qwen-0.6b"
+    assert prepared.dataset_config == "qwen_0_6b_matched_pairs"
+
+
+def test_ait_config_rejects_a_model_without_a_pair_configuration(tmp_path):
+    config = _small_config(tmp_path)
+    config.data.model_matched_configs = {}
+
+    with pytest.raises(ValueError, match="gpt2-small"):
+        config.validate()
 
 
 def test_mean_pooling_excludes_padding_and_special_tokens():
@@ -468,7 +509,8 @@ def test_ait_experiment_smoke_writes_and_selects_all_three_methods(
         "test": _matched_rows("test", 5),
     }
 
-    def load_rows(repo_id, *, split, revision, **kwargs):
+    def load_rows(repo_id, *, config_name, split, revision, **kwargs):
+        assert config_name == "gpt2_small_matched_pairs"
         return HuggingFaceRows(rows[split], revision, "resolved-dataset-commit")
 
     data_loader = AITDatasetLoader(config, rows_loader=load_rows)
@@ -594,6 +636,9 @@ def test_ait_experiment_smoke_writes_and_selects_all_three_methods(
     selection = pd.read_csv(output / "gpt2-small" / "layer_selection.csv")
     combined = pd.read_csv(output / "all_models_metrics.csv")
     similarities = pd.read_csv(output / "all_models_direction_similarities.csv")
+    samples = pd.read_csv(output / "sample_manifest.csv")
+    model_samples = pd.read_csv(output / "gpt2-small" / "sample_manifest.csv")
+    dataset_summary = pd.read_csv(output / "dataset_summary.csv")
     manifest = json.loads((output / "experiment_manifest.json").read_text())
     assert len(metrics) == 6
     assert len(combined) == 6
@@ -625,9 +670,18 @@ def test_ait_experiment_smoke_writes_and_selects_all_three_methods(
     assert set(selection["method"]) == {"mean_diff", "logistic_regression", "das"}
     assert set(selection["selected_layer"]) == {2}
     assert not selection["selection_is_final_evaluation"].any()
-    assert manifest["train_examples"] == 5
-    assert manifest["eval_directed_cases"] == 4
-    assert manifest["test_directed_cases"] == 4
+    assert set(samples["model"]) == {"gpt2-small"}
+    assert set(model_samples["dataset_config"]) == {"gpt2_small_matched_pairs"}
+    assert set(dataset_summary["dataset_config"]) == {"gpt2_small_matched_pairs"}
+    assert manifest["model_matched_configs"] == {
+        "gpt2-small": "gpt2_small_matched_pairs"
+    }
+    assert manifest["requested_train_examples_per_model"] == 5
+    assert manifest["requested_eval_directed_cases_per_model"] == 4
+    assert manifest["requested_test_directed_cases_per_model"] == 4
+    assert manifest["models"][0]["train_examples"] == 5
+    assert manifest["models"][0]["eval_directed_cases"] == 4
+    assert manifest["models"][0]["test_directed_cases"] == 4
     assert manifest["test_is_layer_selection_not_final_evaluation"] is True
     if activation_representation == "last_token":
         figures = plot_ait_valence_run(output, figure_dir=tmp_path / "figures")

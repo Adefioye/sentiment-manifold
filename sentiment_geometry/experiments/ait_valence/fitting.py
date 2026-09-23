@@ -81,6 +81,16 @@ class AITDirectionFitService:
         self.adapter = adapter
         self.model = model
         self.runtime = runtime
+        expected_dataset_config = config.data.matched_config_for(model.name)
+        runtime_dataset_config = str(
+            runtime.get("dataset_config", expected_dataset_config)
+        )
+        if runtime_dataset_config != expected_dataset_config:
+            raise ValueError(
+                f"Runtime dataset configuration {runtime_dataset_config!r} does not "
+                f"match {model.name!r} configuration {expected_dataset_config!r}"
+            )
+        self.dataset_config = runtime_dataset_config
         self._validation_key: tuple[int, str, tuple[str, ...]] | None = None
         self._validation_evaluator: DirectionalPatchingEvaluator | None = None
 
@@ -136,7 +146,7 @@ class AITDirectionFitService:
             "model_revision": self.runtime.get("resolved_model_revision"),
             "tokenizer_revision": self.runtime.get("resolved_tokenizer_revision"),
             "dataset_repo_id": self.config.data.repo_id,
-            "dataset_config": self.config.data.matched_config,
+            "dataset_config": self.dataset_config,
             "requested_dataset_revision": self.runtime.get(
                 "requested_dataset_revision", self.config.data.revision
             ),
@@ -268,7 +278,7 @@ class AITDirectionFitService:
                 "n_training_examples": len(request.examples),
                 "n_training_directed_cases": len(request.train_pairs),
                 "dataset_repo_id": self.config.data.repo_id,
-                "dataset_config": self.config.data.matched_config,
+                "dataset_config": self.dataset_config,
                 "requested_dataset_revision": self.runtime.get(
                     "requested_dataset_revision", self.config.data.revision
                 ),

@@ -84,11 +84,45 @@ class AITValenceDirectionExperiment:
         output_root = Path(self.config.sweep.output_dir)
         output_root.mkdir(parents=True, exist_ok=True)
         store = RunArtifactStore(output_root)
-        data = self.dataset_loader.load()
         store.write_json("requested_config.json", self.config.to_dict())
-        store.write_rows("sample_manifest.csv", data.sample_manifest)
-        store.write_rows("pair_manifest.csv", data.pair_manifest)
-        store.write_rows("dataset_summary.csv", self._dataset_summary(data))
+        prepared_by_model = {
+            model.name: self.dataset_loader.load(model.name)
+            for model in self.config.models
+        }
+        resolved_revisions = {
+            data.resolved_revision for data in prepared_by_model.values()
+        }
+        if len(resolved_revisions) != 1:
+            raise RuntimeError(
+                "AIT model-specific configurations resolved to different revisions: "
+                f"{resolved_revisions}"
+            )
+        resolved_revision = next(iter(resolved_revisions))
+        sample_manifest = [
+            row
+            for data in prepared_by_model.values()
+            for row in data.sample_manifest
+        ]
+        pair_manifest = [
+            row
+            for data in prepared_by_model.values()
+            for row in data.pair_manifest
+        ]
+        dataset_summary = [
+            row
+            for data in prepared_by_model.values()
+            for row in self._dataset_summary(data)
+        ]
+        store.write_rows("sample_manifest.csv", sample_manifest)
+        store.write_rows("pair_manifest.csv", pair_manifest)
+        store.write_rows("dataset_summary.csv", dataset_summary)
+        for model_name, data in prepared_by_model.items():
+            model_store = RunArtifactStore(output_root / model_name)
+            model_store.write_rows("sample_manifest.csv", data.sample_manifest)
+            model_store.write_rows("pair_manifest.csv", data.pair_manifest)
+            model_store.write_rows(
+                "dataset_summary.csv", self._dataset_summary(data)
+            )
 
         combined: dict[str, list[dict[str, Any]]] = {
             "metrics": [],
@@ -101,10 +135,23 @@ class AITValenceDirectionExperiment:
         }
         model_runs: list[dict[str, Any]] = []
         for model in self.config.models:
+            data = prepared_by_model[model.name]
             model_tables, runtime = self._run_model(model, data, output_root / model.name)
             for name, rows in model_tables.items():
                 combined[name].extend(rows)
-            model_runs.append({"model": model.name, "runtime": runtime})
+            model_runs.append(
+                {
+                    "model": model.name,
+                    "dataset_config": data.dataset_config,
+                    "requested_dataset_revision": data.requested_revision,
+                    "resolved_dataset_revision": data.resolved_revision,
+                    "train_examples": len(data.train_examples),
+                    "train_directed_cases": len(data.train_pairs),
+                    "eval_directed_cases": len(data.eval_pairs),
+                    "test_directed_cases": len(data.test_pairs),
+                    "runtime": runtime,
+                }
+            )
         for name, rows in combined.items():
             if rows:
                 store.write_rows(f"all_models_{name}.csv", rows)
@@ -114,8 +161,12 @@ class AITValenceDirectionExperiment:
                 "experiment": "ait-valence-directions",
                 "status": "completed",
                 "dataset_repo_id": self.config.data.repo_id,
-                "requested_dataset_revision": data.requested_revision,
-                "resolved_dataset_revision": data.resolved_revision,
+                "requested_dataset_revision": self.config.data.revision,
+                "resolved_dataset_revision": resolved_revision,
+                "model_matched_configs": {
+                    name: data.dataset_config
+                    for name, data in prepared_by_model.items()
+                },
                 "models": model_runs,
                 "methods": list(self.config.sweep.methods),
                 "activation_representation": self.config.sweep.activation_representation,
@@ -123,10 +174,15 @@ class AITValenceDirectionExperiment:
                 "das_training_position": self.config.intervention_position(),
                 "das_checkpoint_validation_position": "all",
                 "das_layer_selection_position": "all",
-                "train_examples": len(data.train_examples),
-                "train_directed_cases": len(data.train_pairs),
-                "eval_directed_cases": len(data.eval_pairs),
-                "test_directed_cases": len(data.test_pairs),
+                "requested_train_examples_per_model": (
+                    self.config.sampling.train_examples
+                ),
+                "requested_eval_directed_cases_per_model": (
+                    self.config.sampling.eval_directed_cases
+                ),
+                "requested_test_directed_cases_per_model": (
+                    self.config.sampling.test_directed_cases
+                ),
                 "das_checkpoint_role": "eval",
                 "layer_selection_role": "test",
                 "test_is_layer_selection_not_final_evaluation": True,
@@ -150,6 +206,7 @@ class AITValenceDirectionExperiment:
         runtime = dict(adapter.provenance())
         runtime.update(
             {
+                "dataset_config": data.dataset_config,
                 "requested_dataset_revision": data.requested_revision,
                 "resolved_dataset_revision": data.resolved_revision,
             }
@@ -385,6 +442,9 @@ class AITValenceDirectionExperiment:
     def _dataset_summary(self, data: PreparedAITData) -> list[dict[str, Any]]:
         return [
             {
+                "model": data.model_name,
+                "dataset_config": data.dataset_config,
+                "resolved_dataset_revision": data.resolved_revision,
                 "dataset": "ait",
                 "role": "train",
                 "source_split": self.config.data.train_split,
@@ -392,6 +452,9 @@ class AITValenceDirectionExperiment:
                 "n_directed_cases": len(data.train_pairs),
             },
             {
+                "model": data.model_name,
+                "dataset_config": data.dataset_config,
+                "resolved_dataset_revision": data.resolved_revision,
                 "dataset": "ait",
                 "role": "das_checkpoint_validation",
                 "source_split": self.config.data.eval_split,
@@ -405,6 +468,9 @@ class AITValenceDirectionExperiment:
                 "n_directed_cases": len(data.eval_pairs),
             },
             {
+                "model": data.model_name,
+                "dataset_config": data.dataset_config,
+                "resolved_dataset_revision": data.resolved_revision,
                 "dataset": "ait",
                 "role": "layer_selection",
                 "source_split": self.config.data.test_split,

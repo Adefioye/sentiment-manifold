@@ -196,6 +196,12 @@ the original test pairs are evaluated only after the selection is frozen. The pi
 contains 321/99/273 train/validation/test pairs for GPT-2 Small, 323/118/274 for Qwen 0.6B,
 339/113/273 for Gemma 2B, and 333/114/266 for Pythia 1.4B.
 
+The Colab entry point for this contract is
+[`notebooks/07_colab_train_full_ait_last_token_directions.ipynb`](../../notebooks/07_colab_train_full_ait_last_token_directions.ipynb).
+It invokes the full-data configuration with `--last-token`, writes checkpoints and CSVs to a
+timestamped Google Drive run, displays validation selections and locked-test metrics, and saves
+first/middle/last-boundary cosine-similarity tables and heatmaps.
+
 Mean difference and logistic regression fit masked mean-pooled residual activations over all
 non-padding, non-special prompt tokens. One-dimensional DAS retains causal training semantics: it
 uses the directed train pairs and patches all non-padding token positions. At every layer, the DAS

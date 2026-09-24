@@ -41,10 +41,13 @@ class DirectionEvaluator:
         fit_position: str,
         method: str,
         layer: int,
+        patch_position: str = "all",
         evaluation_names: Sequence[str] | None = None,
         phase: str = "evaluation",
         selected_layer: bool = False,
     ) -> DirectionEvaluationResult:
+        if patch_position not in {"all", "final"}:
+            raise ValueError(f"Unsupported patch position: {patch_position!r}")
         metric_rows: list[dict[str, Any]] = []
         patching_rows: list[dict[str, Any]] = []
         identity = {
@@ -66,14 +69,14 @@ class DirectionEvaluator:
                 fitted.artifact.vector,
                 layer=layer,
                 answers=evaluation.answers,
-                position="all",
+                position=patch_position,
                 batch_size=self.batch_size,
             )
             metric_rows.append(
                 {
                     **identity,
                     "dataset": evaluation.name,
-                    "patch_position": "all",
+                    "patch_position": patch_position,
                     "n_directed_cases": result.n_pairs,
                     "logit_difference_percent": result.recovery_percent,
                     "logit_flip_percent": result.flip_percent,
@@ -90,7 +93,7 @@ class DirectionEvaluator:
                 {
                     **identity,
                     "dataset": evaluation.name,
-                    "patch_position": "all",
+                    "patch_position": patch_position,
                     **record,
                 }
                 for record in result.records

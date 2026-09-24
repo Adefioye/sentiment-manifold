@@ -10,6 +10,7 @@ from .config import (
 )
 from .datasets import AITDatasetLoader, PreparedAITData
 from .experiment import AITValenceDirectionExperiment, run_ait_valence_direction_experiment
+from .transfer_evaluation import AITValenceTransferConfig
 
 __all__ = [
     "AITDatasetLoader",
@@ -19,6 +20,7 @@ __all__ = [
     "AITValenceExperimentConfig",
     "AITValenceSelectionConfig",
     "AITValenceSweepConfig",
+    "AITValenceTransferConfig",
     "PreparedAITData",
     "apply_ait_valence_overrides",
     "run_ait_valence_direction_experiment",

@@ -1,0 +1,63 @@
+source:
+  experiment_name: full-ait-last-token-directions
+  run_id: 2026-09-23_09-10_CDT
+  # The source run's validation-selected layers were evaluated once on locked AIT test.
+  evaluation_dataset: ait_test
+  direction_domain: ait_valence
+  activation_representation: last_token
+
+evaluation:
+  experiment_name: ait-valence-ood-evaluation
+  methods: [mean_diff, das]
+  fit_position: final
+  selection_dataset: ait_eval
+  selection_metric: logit_flip_percent
+  # Match the intervention protocol used to select each layer in the full-AIT run.
+  method_patch_positions:
+    mean_diff: final
+    das: all
+  hf_token_env: HF_TOKEN
+
+models:
+  - name: gpt2-small
+    revision: 607a30d783dfa663caf39e06633721c8d4cfcd7e
+    prepend_bos: true
+    device: auto
+    dtype: auto
+    batch_size: 16
+  - name: qwen-0.6b
+    revision: da87bfb608c14b7cf20ba1ce41287e8de496c0cd
+    prepend_bos: false
+    device: auto
+    dtype: auto
+    batch_size: 8
+
+datasets:
+  - name: sst
+    repo_id: kokolamba/sentiment-manifold-sst-pythia-2.8b
+    revision: bcffb933a34a48b409a7caf3a53f0fe7bb8152cc
+    split: test
+    configs:
+      gpt2-small: tigges_gpt2_small_directed_pairs
+      qwen-0.6b: tigges_qwen_0_6b_directed_pairs
+  - name: imdb
+    repo_id: kokolamba/sentiment-manifold-imdb-pythia-2.8b
+    revision: 06586d20342aa46fa61525b1f7609ab065983e3e
+    split: test
+    configs:
+      gpt2-small: gpt2_small_directed_pairs
+      qwen-0.6b: qwen_0_6b_directed_pairs
+  - name: dynasent_r1
+    repo_id: kokolamba/sentiment-manifold-dynasent-r1-r2-pythia-2.8b
+    revision: f4aa6cc90bfeda2080e6445592a8f689c974fd3d
+    split: test
+    configs:
+      gpt2-small: r1_gpt2_small_directed_pairs
+      qwen-0.6b: r1_qwen_0_6b_directed_pairs
+  - name: dynasent_r2
+    repo_id: kokolamba/sentiment-manifold-dynasent-r1-r2-pythia-2.8b
+    revision: f4aa6cc90bfeda2080e6445592a8f689c974fd3d
+    split: test
+    configs:
+      gpt2-small: r2_gpt2_small_directed_pairs
+      qwen-0.6b: r2_qwen_0_6b_directed_pairs

@@ -48,6 +48,9 @@ Explore a completed Drive run without writing new artifacts using the
 [`sentiment-position results notebook`](notebooks/04_colab_explore_sentiment_position_results.ipynb).
 Reuse its frozen END-position, ADVERB-selected directions on SST, IMDb, and DynaSent with the
 [`frozen OOD evaluation notebook`](notebooks/05_colab_evaluate_frozen_end_directions.ipynb).
+Evaluate the validation-selected full-AIT last-token valence directions on the same four transfer
+datasets with the
+[`AIT valence transfer notebook`](notebooks/08_colab_evaluate_frozen_ait_valence_directions.ipynb).
 
 ## Documentation
 

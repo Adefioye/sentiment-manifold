@@ -205,6 +205,16 @@ locked-test metrics for GPT-2 Small and Qwen by loading their per-model result d
 saves first/middle/last-boundary cosine-similarity tables and heatmaps. This avoids treating the
 Qwen-only root aggregate CSVs from the continuation as a two-model report.
 
+The locked cross-dataset follow-up is configured by
+[`configs/ait_valence_transfer_evaluation.yaml`](../../configs/ait_valence_transfer_evaluation.yaml)
+and run from
+[`notebooks/08_colab_evaluate_frozen_ait_valence_directions.ipynb`](../../notebooks/08_colab_evaluate_frozen_ait_valence_directions.ipynb).
+It reads each method's AIT-validation-selected layer and checkpoint from the completed full-data
+run and evaluates the frozen mean-difference and DAS choices on SST, IMDb, DynaSent R1, and
+DynaSent R2. Logistic regression is excluded from this transfer run because of its poor full-AIT
+result. Mean difference patches the final token; DAS preserves the all-token
+validation/evaluation protocol. None of the transfer datasets is used for reselection.
+
 Mean difference and logistic regression fit masked mean-pooled residual activations over all
 non-padding, non-special prompt tokens. One-dimensional DAS retains causal training semantics: it
 uses the directed train pairs and patches all non-padding token positions. At every layer, the DAS

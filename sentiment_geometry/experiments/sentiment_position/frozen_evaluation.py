@@ -64,6 +64,10 @@ class FrozenDirectionEvaluationConfig:
     fit_position: str = "final"
     selection_dataset: str = "toy_adverbs"
     selection_metric: str = "logit_flip_percent"
+    source_evaluation_dataset: str = "sst"
+    source_direction_domain: str | None = None
+    source_activation_representation: str | None = None
+    method_patch_positions: dict[str, str] = field(default_factory=dict)
     hf_token_env: str = "HF_TOKEN"
     reuse_completed_models: list[str] = field(default_factory=list)
 
@@ -107,6 +111,25 @@ class FrozenDirectionEvaluationConfig:
             raise ValueError(f"Unsupported fitting position: {self.fit_position!r}")
         if not self.selection_dataset or not self.selection_metric:
             raise ValueError("Selection dataset and metric must be explicit")
+        if not self.source_evaluation_dataset:
+            raise ValueError("Source evaluation dataset must be explicit")
+        unknown_patch_methods = sorted(
+            set(self.method_patch_positions) - set(self.methods)
+        )
+        if unknown_patch_methods:
+            raise ValueError(
+                "Patch positions were configured for inactive methods: "
+                f"{unknown_patch_methods}"
+            )
+        invalid_patch_positions = {
+            method: position
+            for method, position in self.method_patch_positions.items()
+            if position not in {"all", "final"}
+        }
+        if invalid_patch_positions:
+            raise ValueError(
+                f"Unsupported method patch positions: {invalid_patch_positions}"
+            )
         if not self.hf_token_env:
             raise ValueError("Hugging Face token environment variable cannot be empty")
         for dataset in self.datasets:
@@ -122,6 +145,10 @@ class FrozenDirectionEvaluationConfig:
             "fit_position": self.fit_position,
             "selection_dataset": self.selection_dataset,
             "selection_metric": self.selection_metric,
+            "source_evaluation_dataset": self.source_evaluation_dataset,
+            "source_direction_domain": self.source_direction_domain,
+            "source_activation_representation": self.source_activation_representation,
+            "method_patch_positions": dict(self.method_patch_positions),
             "hf_token_env": self.hf_token_env,
             "reuse_completed_models": list(self.reuse_completed_models),
         }
@@ -226,15 +253,25 @@ def load_frozen_direction_selections(
     for _, row in frozen.sort_values("method", kind="stable").iterrows():
         layer = int(row["selected_layer"])
         method = str(row["method"])
-        sst_metrics = selected_metrics[
+        source_metrics = selected_metrics[
             (selected_metrics["method"] == method)
             & (selected_metrics["fit_position"] == config.fit_position)
-            & (selected_metrics["dataset"] == "sst")
+            & (selected_metrics["dataset"] == config.source_evaluation_dataset)
         ]
-        if len(sst_metrics) != 1 or int(sst_metrics.iloc[0]["layer"]) != layer:
+        if len(source_metrics) != 1 or int(source_metrics.iloc[0]["layer"]) != layer:
             raise RuntimeError(
-                f"The parent SST result does not use the frozen layer for "
+                f"The parent {config.source_evaluation_dataset!r} result does not use "
+                f"the frozen layer for "
                 f"{model.name}/{method}/{config.fit_position}/layer{layer}"
+            )
+        expected_patch_position = config.method_patch_positions.get(method, "all")
+        if (
+            "patch_position" in source_metrics.columns
+            and set(source_metrics["patch_position"]) != {expected_patch_position}
+        ):
+            raise RuntimeError(
+                f"The parent evaluation patch position does not match "
+                f"{model.name}/{method}: expected {expected_patch_position!r}"
             )
         matches = direction_metadata[
             (direction_metadata["method"] == method)
@@ -283,6 +320,26 @@ def load_frozen_direction_selections(
         if artifact.metadata.get("fit_position") != config.fit_position:
             raise RuntimeError(
                 f"Direction checkpoint fit-position mismatch at {checkpoint_path}"
+            )
+        if (
+            config.source_direction_domain is not None
+            and artifact.metadata.get("domain") != config.source_direction_domain
+        ):
+            raise RuntimeError(
+                f"Direction checkpoint domain mismatch at {checkpoint_path}: "
+                f"{artifact.metadata.get('domain')!r} != "
+                f"{config.source_direction_domain!r}"
+            )
+        if (
+            config.source_activation_representation is not None
+            and artifact.metadata.get("activation_representation")
+            != config.source_activation_representation
+        ):
+            raise RuntimeError(
+                f"Direction checkpoint activation-representation mismatch at "
+                f"{checkpoint_path}: "
+                f"{artifact.metadata.get('activation_representation')!r} != "
+                f"{config.source_activation_representation!r}"
             )
         if not np.isclose(float(np.linalg.norm(artifact.vector)), 1.0, atol=1e-5):
             raise RuntimeError(f"Direction is not unit norm: {checkpoint_path}")
@@ -376,6 +433,12 @@ class FrozenSentimentDirectionEvaluation:
                 "source_run_status": source_manifest.get("status"),
                 "selection_dataset": self.config.selection_dataset,
                 "selection_metric": self.config.selection_metric,
+                "source_evaluation_dataset": self.config.source_evaluation_dataset,
+                "source_direction_domain": self.config.source_direction_domain,
+                "source_activation_representation": (
+                    self.config.source_activation_representation
+                ),
+                "method_patch_positions": dict(self.config.method_patch_positions),
                 "fit_position": self.config.fit_position,
                 "methods": list(self.config.methods),
                 "models": [
@@ -432,6 +495,20 @@ class FrozenSentimentDirectionEvaluation:
             raise RuntimeError(f"Reused metrics have the wrong datasets for {model_name!r}")
         if len(metrics) != len(expected_methods) * len(expected_datasets):
             raise RuntimeError(f"Reused metrics have duplicate or missing cells for {model_name!r}")
+        if self.config.method_patch_positions:
+            if "patch_position" not in metrics.columns:
+                raise RuntimeError(
+                    f"Reused metrics do not record patch positions for {model_name!r}"
+                )
+            for method, expected_position in self.config.method_patch_positions.items():
+                observed_positions = set(
+                    metrics.loc[metrics["method"] == method, "patch_position"]
+                )
+                if observed_positions != {expected_position}:
+                    raise RuntimeError(
+                        f"Reused metrics have the wrong patch position for "
+                        f"{model_name!r}/{method}: {observed_positions}"
+                    )
         if len(selections) != len(expected_methods) or set(selections["method"]) != expected_methods:
             raise RuntimeError(f"Reused layer selections are incomplete for {model_name!r}")
         if set(selections["fit_position"]) != {self.config.fit_position}:
@@ -491,6 +568,9 @@ class FrozenSentimentDirectionEvaluation:
                 fit_position=selected.fit_position,
                 method=selected.method,
                 layer=selected.selected_layer,
+                patch_position=self.config.method_patch_positions.get(
+                    selected.method, "all"
+                ),
                 evaluation_names=tuple(evaluations),
                 phase="frozen_ood_evaluation",
                 selected_layer=True,
@@ -513,6 +593,9 @@ class FrozenSentimentDirectionEvaluation:
                     "selection_dataset": selected.selection_dataset,
                     "selection_metric": selected.selection_metric,
                     "selection_value_percent": selected.selection_value_percent,
+                    "evaluation_patch_position": self.config.method_patch_positions.get(
+                        selected.method, "all"
+                    ),
                     "source_run_id": source_run_id,
                     "source_direction_checkpoint": str(selected.checkpoint_path),
                 }
@@ -523,6 +606,9 @@ class FrozenSentimentDirectionEvaluation:
                     "method": selected.method,
                     "fit_position": selected.fit_position,
                     "layer": selected.selected_layer,
+                    "evaluation_patch_position": self.config.method_patch_positions.get(
+                        selected.method, "all"
+                    ),
                     "unit_norm": float(np.linalg.norm(selected.artifact.vector)),
                     "artifact_schema_version": selected.artifact.metadata.get(
                         "artifact_schema_version"

@@ -138,6 +138,7 @@ def test_frozen_evaluation_writes_metrics_records_and_provenance(
 ):
     source, _ = _source_run(tmp_path)
     config = _config(tmp_path, source)
+    config.method_patch_positions = {"mean_diff": "final"}
     clean = TextExample(
         text="Review Text: good Review Sentiment:",
         label=1,
@@ -170,6 +171,7 @@ def test_frozen_evaluation_writes_metrics_records_and_provenance(
             }
 
     def fake_evaluate(self, fitted, **kwargs):
+        assert kwargs["patch_position"] == "final"
         identity = {
             "model": self.model_name,
             "method": kwargs["method"],
@@ -178,7 +180,7 @@ def test_frozen_evaluation_writes_metrics_records_and_provenance(
             "phase": kwargs["phase"],
             "selected_layer": kwargs["selected_layer"],
             "dataset": "sst",
-            "patch_position": "all",
+            "patch_position": "final",
         }
         return DirectionEvaluationResult(
             metrics=(
@@ -257,9 +259,24 @@ def test_frozen_selection_rejects_parent_sst_layer_mismatch(tmp_path):
     try:
         load_frozen_direction_selections(config, config.models[0])
     except RuntimeError as error:
-        assert "parent SST result does not use the frozen layer" in str(error)
+        assert "parent 'sst' result does not use the frozen layer" in str(error)
     else:
         raise AssertionError("Expected a parent SST layer mismatch to be rejected")
+
+
+def test_frozen_selection_accepts_configured_source_evaluation_dataset(tmp_path):
+    source, _ = _source_run(tmp_path)
+    selected_metrics_path = source / "results" / "gpt2-small" / "selected_metrics.csv"
+    selected_metrics = pd.read_csv(selected_metrics_path)
+    selected_metrics["dataset"] = "ait_test"
+    selected_metrics.to_csv(selected_metrics_path, index=False)
+    config = _config(tmp_path, source)
+    config.source_evaluation_dataset = "ait_test"
+
+    selections = load_frozen_direction_selections(config, config.models[0])
+
+    assert selections[0].selected_layer == 3
+    assert config.to_dict()["source_evaluation_dataset"] == "ait_test"
 
 
 def test_frozen_evaluation_reuses_completed_model_rows(monkeypatch, tmp_path):

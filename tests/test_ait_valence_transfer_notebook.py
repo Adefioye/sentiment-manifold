@@ -46,6 +46,8 @@ def test_ait_transfer_notebook_locks_selection_and_ood_contract():
         "run_frozen_sentiment_direction_evaluation(config)",
         '{"ait_eval"}',
         'plan.source_evaluation_dataset',
+        'plan.require_completed_source_status',
+        '"source_run_status": source_manifest.get("status")',
         'plan.method_patch_positions',
         'DATASET_ORDER = [dataset.name for dataset in plan.datasets]',
         '"logit_flip_percent": "Logit Flip Percent"',

@@ -5,6 +5,9 @@ source:
   evaluation_dataset: ait_test
   direction_domain: ait_valence
   activation_representation: last_token
+  # Completion is established from required tables and checkpoints; the source manifest may
+  # remain "resumed" after notebook 07 was reopened.
+  require_completed_status: false
 
 evaluation:
   experiment_name: ait-valence-ood-evaluation

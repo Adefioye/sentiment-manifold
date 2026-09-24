@@ -67,6 +67,7 @@ class FrozenDirectionEvaluationConfig:
     source_evaluation_dataset: str = "sst"
     source_direction_domain: str | None = None
     source_activation_representation: str | None = None
+    require_completed_source_status: bool = True
     method_patch_positions: dict[str, str] = field(default_factory=dict)
     hf_token_env: str = "HF_TOKEN"
     reuse_completed_models: list[str] = field(default_factory=list)
@@ -79,7 +80,7 @@ class FrozenDirectionEvaluationConfig:
         if not manifest_path.is_file():
             raise FileNotFoundError(f"Source run manifest does not exist: {manifest_path}")
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        if manifest.get("status") != "completed":
+        if self.require_completed_source_status and manifest.get("status") != "completed":
             raise RuntimeError(
                 f"Source run is not completed: {manifest.get('status')!r}"
             )
@@ -148,6 +149,7 @@ class FrozenDirectionEvaluationConfig:
             "source_evaluation_dataset": self.source_evaluation_dataset,
             "source_direction_domain": self.source_direction_domain,
             "source_activation_representation": self.source_activation_representation,
+            "require_completed_source_status": self.require_completed_source_status,
             "method_patch_positions": dict(self.method_patch_positions),
             "hf_token_env": self.hf_token_env,
             "reuse_completed_models": list(self.reuse_completed_models),

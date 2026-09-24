@@ -17,6 +17,7 @@ def test_ait_transfer_config_locks_source_selection_and_patch_protocol():
     assert config.source_evaluation_dataset == "ait_test"
     assert config.source_direction_domain == "ait_valence"
     assert config.source_activation_representation == "last_token"
+    assert config.require_completed_source_status is False
     assert config.method_patch_positions == {
         "mean_diff": "final",
         "das": "all",
@@ -36,7 +37,7 @@ def test_ait_transfer_config_builds_frozen_evaluation(tmp_path):
     source_root = plan.source_run_root(tmp_path)
     source_root.mkdir(parents=True)
     (source_root / "run_manifest.json").write_text(
-        json.dumps({"run_id": plan.source_run_id, "status": "completed"}),
+        json.dumps({"run_id": plan.source_run_id, "status": "resumed"}),
         encoding="utf-8",
     )
 
@@ -54,6 +55,7 @@ def test_ait_transfer_config_builds_frozen_evaluation(tmp_path):
     assert config.source_evaluation_dataset == "ait_test"
     assert config.source_direction_domain == "ait_valence"
     assert config.source_activation_representation == "last_token"
+    assert config.require_completed_source_status is False
     assert config.models[0].name == "qwen-0.6b"
     assert config.models[0].device == "cuda"
     assert config.models[0].batch_size == 8

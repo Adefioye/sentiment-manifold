@@ -38,6 +38,7 @@ class AITValenceTransferConfig:
     source_evaluation_dataset: str = "ait_test"
     source_direction_domain: str = "ait_valence"
     source_activation_representation: str = "last_token"
+    require_completed_source_status: bool = False
     method_patch_positions: dict[str, str] = field(
         default_factory=lambda: {
             "mean_diff": "final",
@@ -71,6 +72,9 @@ class AITValenceTransferConfig:
             source_direction_domain=str(source.get("direction_domain", "")),
             source_activation_representation=str(
                 source.get("activation_representation", "")
+            ),
+            require_completed_source_status=bool(
+                source.get("require_completed_status", False)
             ),
             method_patch_positions=dict(
                 evaluation.get("method_patch_positions", {})
@@ -210,6 +214,7 @@ class AITValenceTransferConfig:
             source_evaluation_dataset=self.source_evaluation_dataset,
             source_direction_domain=self.source_direction_domain,
             source_activation_representation=self.source_activation_representation,
+            require_completed_source_status=self.require_completed_source_status,
             method_patch_positions=dict(self.method_patch_positions),
             hf_token_env=self.hf_token_env,
             reuse_completed_models=reused_names,
@@ -227,6 +232,7 @@ class AITValenceTransferConfig:
                 "evaluation_dataset": self.source_evaluation_dataset,
                 "direction_domain": self.source_direction_domain,
                 "activation_representation": self.source_activation_representation,
+                "require_completed_status": self.require_completed_source_status,
             },
             "evaluation": {
                 "experiment_name": self.output_experiment_name,

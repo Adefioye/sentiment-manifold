@@ -133,6 +133,24 @@ def test_frozen_selection_relocates_checkpoint_and_preserves_adverb_selection(tm
     assert selected.artifact.metadata["fit_position"] == "final"
 
 
+def test_frozen_config_can_treat_source_manifest_status_as_informational(tmp_path):
+    source, _ = _source_run(tmp_path)
+    (source / "run_manifest.json").write_text(
+        json.dumps({"run_id": "prior", "status": "resumed"}), encoding="utf-8"
+    )
+    config = _config(tmp_path, source)
+
+    try:
+        config.validate()
+    except RuntimeError as error:
+        assert "Source run is not completed" in str(error)
+    else:
+        raise AssertionError("Strict source-status validation should reject resumed runs")
+
+    config.require_completed_source_status = False
+    config.validate()
+
+
 def test_frozen_evaluation_writes_metrics_records_and_provenance(
     monkeypatch, tmp_path
 ):

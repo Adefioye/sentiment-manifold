@@ -163,18 +163,18 @@ class AITValenceTransferConfig:
         """Materialize the generic frozen evaluator without changing selection."""
 
         configured = {model.name: model for model in self.models}
-        evaluated_names = list(evaluated_model_names or configured)
+        evaluated_names = list(
+            configured if evaluated_model_names is None else evaluated_model_names
+        )
         reused_names = list(reuse_completed_models)
         requested_names = evaluated_names + reused_names
+        if not requested_names:
+            raise ValueError("At least one AIT transfer model must be evaluated or reused")
         unknown = sorted(set(requested_names) - set(configured))
         if unknown:
             raise ValueError(f"Unknown AIT transfer models: {unknown}")
         if set(evaluated_names) & set(reused_names):
             raise ValueError("A model cannot be both evaluated and reused")
-        if set(requested_names) != set(configured):
-            raise ValueError(
-                "Every configured model must be either evaluated or reused"
-            )
         if len(requested_names) != len(set(requested_names)):
             raise ValueError("Evaluated and reused model names must be unique")
         unknown_batch_sizes = sorted(set(batch_sizes or {}) - set(evaluated_names))

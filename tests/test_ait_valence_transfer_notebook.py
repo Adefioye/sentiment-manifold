@@ -32,7 +32,15 @@ def test_ait_transfer_notebook_locks_selection_and_ood_contract():
         "configs/ait_valence_transfer_evaluation.yaml",
         'SOURCE_RUN_ID = "2026-09-23_09-10_CDT"',
         'ALL_MODEL_NAMES = ["gpt2-small", "qwen-0.6b"]',
-        'EVALUATION_MODEL_NAMES = ["gpt2-small", "qwen-0.6b"]',
+        'RUN_STAGE = "gpt2"',
+        'GPT2_BATCH_SIZE = 16',
+        'QWEN_BATCH_SIZE = 8',
+        '"evaluate": ["gpt2-small"]',
+        '"evaluate": ["qwen-0.6b"]',
+        '"reuse": ["gpt2-small"]',
+        'EVALUATION_MODEL_NAMES = list(ACTIVE_STAGE["evaluate"])',
+        'RESULT_MODEL_NAMES = REUSE_COMPLETED_MODEL_NAMES + EVALUATION_MODEL_NAMES',
+        'The Qwen stage must set RESUME_RUN_ID',
         "AITValenceTransferConfig.load",
         "load_frozen_direction_selections",
         "run_frozen_sentiment_direction_evaluation(config)",
@@ -42,7 +50,6 @@ def test_ait_transfer_notebook_locks_selection_and_ood_contract():
         'DATASET_ORDER = [dataset.name for dataset in plan.datasets]',
         '"logit_flip_percent": "Logit Flip Percent"',
         '"sign_flip_percent": "Literal Sign Flip Percent"',
-        'RUN_LAYOUT.update_manifest(\n    status="completed"',
+        'status="completed" if FINAL_COMBINED_RUN else "partial"',
     ):
         assert required in source
-

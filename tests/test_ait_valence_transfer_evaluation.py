@@ -59,3 +59,24 @@ def test_ait_transfer_config_builds_frozen_evaluation(tmp_path):
     assert config.models[0].batch_size == 8
     assert config.reuse_completed_models == ["gpt2-small"]
     assert config.method_patch_positions["das"] == "all"
+
+
+def test_ait_transfer_config_supports_a_single_model_first_stage(tmp_path):
+    plan = AITValenceTransferConfig.load(CONFIG_PATH)
+    source_root = plan.source_run_root(tmp_path)
+    source_root.mkdir(parents=True)
+    (source_root / "run_manifest.json").write_text(
+        json.dumps({"run_id": plan.source_run_id, "status": "completed"}),
+        encoding="utf-8",
+    )
+
+    config = plan.build_evaluation_config(
+        storage_root=tmp_path,
+        output_dir=tmp_path / "output",
+        evaluated_model_names=["gpt2-small"],
+        batch_sizes={"gpt2-small": 16},
+    )
+
+    assert [model.name for model in config.models] == ["gpt2-small"]
+    assert config.models[0].batch_size == 16
+    assert config.reuse_completed_models == []

@@ -18,7 +18,7 @@ from ..persistence import RunArtifactStore
 
 @dataclass(frozen=True)
 class DirectionAlignmentSource:
-    """One completed experiment supplying validation-selected directions."""
+    """One source experiment supplying validation-selected directions."""
 
     name: str
     experiment_name: str
@@ -159,7 +159,7 @@ def _checkpoint_candidates(
     return tuple(dict.fromkeys(candidates))
 
 
-def _completed_source_root(
+def _source_root_with_manifest(
     source: DirectionAlignmentSource,
     storage_root: str | Path,
 ) -> Path:
@@ -167,12 +167,7 @@ def _completed_source_root(
     manifest_path = root / "run_manifest.json"
     if not manifest_path.is_file():
         raise FileNotFoundError(manifest_path)
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if manifest.get("status") != "completed":
-        raise RuntimeError(
-            f"Direction source {source.name!r} is not completed: "
-            f"{manifest.get('status')!r}"
-        )
+    json.loads(manifest_path.read_text(encoding="utf-8"))
     return root
 
 
@@ -380,7 +375,7 @@ def run_direction_alignment_analysis(
 
     config.validate()
     source_roots = {
-        source.name: _completed_source_root(source, storage_root)
+        source.name: _source_root_with_manifest(source, storage_root)
         for source in config.sources
     }
     directions: list[SelectedDirection] = []

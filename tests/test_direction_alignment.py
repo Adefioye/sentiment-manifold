@@ -27,6 +27,7 @@ def _write_source(
     *,
     domain: str | None = None,
     activation_representation: str | None = None,
+    manifest_status: str = "completed",
 ) -> None:
     root = source.run_root(storage_root)
     model_root = root / "results" / "gpt2-small"
@@ -34,7 +35,7 @@ def _write_source(
     model_root.mkdir(parents=True)
     directions_root.mkdir(parents=True)
     (root / "run_manifest.json").write_text(
-        json.dumps({"run_id": source.run_id, "status": "completed"}),
+        json.dumps({"run_id": source.run_id, "status": manifest_status}),
         encoding="utf-8",
     )
     selection_rows = []
@@ -154,6 +155,7 @@ def test_direction_alignment_loads_selected_artifacts_and_computes_three_views(t
         {"mean_diff": 5, "das": 6},
         domain="ait_valence",
         activation_representation="last_token",
+        manifest_status="resumed",
     )
     config = DirectionAlignmentConfig(
         output_experiment_name="alignment",

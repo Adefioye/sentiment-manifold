@@ -51,6 +51,8 @@ Reuse its frozen END-position, ADVERB-selected directions on SST, IMDb, and Dyna
 Evaluate the validation-selected full-AIT last-token valence directions on the same four transfer
 datasets with the
 [`AIT valence transfer notebook`](notebooks/08_colab_evaluate_frozen_ait_valence_directions.ipynb).
+Compare the frozen best-layer ToyMovieReview sentiment and full-AIT valence directions with the
+[`sentiment–valence alignment notebook`](notebooks/09_colab_explore_sentiment_valence_direction_alignment.ipynb).
 
 ## Documentation
 

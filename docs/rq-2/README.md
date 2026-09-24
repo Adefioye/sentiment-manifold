@@ -215,6 +215,13 @@ DynaSent R2. Logistic regression is excluded from this transfer run because of i
 result. Mean difference patches the final token; DAS preserves the all-token
 validation/evaluation protocol. None of the transfer datasets is used for reselection.
 
+The read-only geometric comparison in
+[`notebooks/09_colab_explore_sentiment_valence_direction_alignment.ipynb`](../../notebooks/09_colab_explore_sentiment_valence_direction_alignment.ipynb)
+loads the mean-difference and one-dimensional DAS directions at their frozen best layers from the
+completed ToyMovieReview sentiment run and full-AIT valence run. It saves signed and absolute
+cosines for within-sentiment, within-valence, and valence-versus-sentiment matrices for GPT-2 Small
+and Qwen3-0.6B Base. This is a correlational geometry diagnostic, not a causal-mechanism result.
+
 Mean difference and logistic regression fit masked mean-pooled residual activations over all
 non-padding, non-special prompt tokens. One-dimensional DAS retains causal training semantics: it
 uses the directed train pairs and patches all non-padding token positions. At every layer, the DAS

@@ -5,6 +5,7 @@ from .ait_valence import (
     load_ait_valence_report_data,
     plot_ait_valence_run,
 )
+from .direction_alignment import plot_direction_alignment
 from .sentiment_position import (
     DATASET_ORDER,
     MODEL_ORDER,
@@ -29,6 +30,7 @@ __all__ = [
     "plot_ait_valence_run",
     "plot_cosine_similarity_grid",
     "plot_cross_position_cosines",
+    "plot_direction_alignment",
     "plot_logit_difference_grid",
     "select_table1_best_layers",
     "selected_layer_table",

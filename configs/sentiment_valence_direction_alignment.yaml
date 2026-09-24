@@ -1,0 +1,36 @@
+output_experiment_name: sentiment-valence-direction-alignment
+methods: [mean_diff, das]
+
+models:
+  - name: gpt2-small
+    revision: 607a30d783dfa663caf39e06633721c8d4cfcd7e
+    prepend_bos: true
+    device: cpu
+    dtype: float32
+    batch_size: 1
+  - name: qwen-0.6b
+    revision: da87bfb608c14b7cf20ba1ce41287e8de496c0cd
+    prepend_bos: false
+    device: cpu
+    dtype: float32
+    batch_size: 1
+
+sources:
+  sentiment:
+    experiment_name: sentiment-position-comparison
+    run_id: 2026-09-18_20-22_CDT
+    fit_position: final
+    selection_dataset: toy_adverbs
+    selection_metric: logit_flip_percent
+    evaluation_dataset: sst
+    expected_domain: null
+    expected_activation_representation: null
+  valence:
+    experiment_name: full-ait-last-token-directions
+    run_id: 2026-09-23_09-10_CDT
+    fit_position: final
+    selection_dataset: ait_eval
+    selection_metric: logit_flip_percent
+    evaluation_dataset: ait_test
+    expected_domain: ait_valence
+    expected_activation_representation: last_token

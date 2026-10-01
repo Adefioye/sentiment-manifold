@@ -1,4 +1,4 @@
-"""Cross-run geometry for frozen sentiment and valence direction artifacts."""
+"""Cross-run geometry for frozen direction artifacts."""
 
 from __future__ import annotations
 
@@ -121,6 +121,95 @@ class DirectionAlignmentResult:
     selected_directions: pd.DataFrame
     similarities: pd.DataFrame
     same_method_alignment: pd.DataFrame
+    output_dir: Path
+
+
+@dataclass
+class PairwiseDirectionAlignmentConfig:
+    """Configuration for one directed, cross-source direction comparison."""
+
+    output_experiment_name: str
+    models: list[ModelConfig]
+    sources: list[DirectionAlignmentSource]
+    row_source: str
+    column_source: str
+    methods: list[str] = field(default_factory=lambda: ["mean_diff", "das"])
+    source_path: Path | None = None
+
+    @classmethod
+    def load(cls, path: str | Path) -> PairwiseDirectionAlignmentConfig:
+        path = Path(path).resolve()
+        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        config = cls(
+            output_experiment_name=str(raw.get("output_experiment_name", "")),
+            models=[ModelConfig(**item) for item in raw.get("models", [])],
+            sources=[
+                DirectionAlignmentSource(name=str(name), **values)
+                for name, values in raw.get("sources", {}).items()
+            ],
+            row_source=str(raw.get("row_source", "")),
+            column_source=str(raw.get("column_source", "")),
+            methods=list(raw.get("methods", [])),
+            source_path=path,
+        )
+        config.validate()
+        return config
+
+    def validate(self) -> None:
+        if not self.output_experiment_name:
+            raise ValueError("Pairwise alignment output experiment name cannot be empty")
+        if not self.models:
+            raise ValueError("Pairwise alignment requires at least one model")
+        model_names = [model.name for model in self.models]
+        if len(model_names) != len(set(model_names)):
+            raise ValueError("Pairwise alignment model names must be unique")
+        if not self.methods or len(self.methods) != len(set(self.methods)):
+            raise ValueError("Pairwise alignment methods must be non-empty and unique")
+        source_names = [source.name for source in self.sources]
+        if len(source_names) != 2 or len(source_names) != len(set(source_names)):
+            raise ValueError("Pairwise alignment requires exactly two unique sources")
+        requested_sources = {self.row_source, self.column_source}
+        if not self.row_source or not self.column_source or len(requested_sources) != 2:
+            raise ValueError("Pairwise alignment row and column sources must be distinct")
+        if requested_sources != set(source_names):
+            raise ValueError(
+                "Pairwise alignment row and column sources must match configured sources"
+            )
+        for source in self.sources:
+            for label, value in (
+                ("experiment name", source.experiment_name),
+                ("run ID", source.run_id),
+                ("fit position", source.fit_position),
+                ("selection dataset", source.selection_dataset),
+                ("selection metric", source.selection_metric),
+                ("evaluation dataset", source.evaluation_dataset),
+            ):
+                if not value:
+                    raise ValueError(f"{source.name} source {label} cannot be empty")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "output_experiment_name": self.output_experiment_name,
+            "models": [asdict(model) for model in self.models],
+            "sources": {
+                source.name: {
+                    key: value
+                    for key, value in asdict(source).items()
+                    if key != "name"
+                }
+                for source in self.sources
+            },
+            "row_source": self.row_source,
+            "column_source": self.column_source,
+            "methods": list(self.methods),
+            "source_path": str(self.source_path) if self.source_path else None,
+        }
+
+
+@dataclass(frozen=True)
+class PairwiseDirectionAlignmentResult:
+    selected_directions: pd.DataFrame
+    absolute_cosines: pd.DataFrame
     output_dir: Path
 
 
@@ -467,10 +556,96 @@ def run_direction_alignment_analysis(
     )
 
 
+def run_pairwise_direction_alignment_analysis(
+    config: PairwiseDirectionAlignmentConfig,
+    *,
+    storage_root: str | Path,
+    output_dir: str | Path,
+) -> PairwiseDirectionAlignmentResult:
+    """Compare frozen best directions from exactly two sources using absolute cosine."""
+
+    config.validate()
+    source_roots = {
+        source.name: _source_root_with_manifest(source, storage_root)
+        for source in config.sources
+    }
+    directions: list[SelectedDirection] = []
+    for source in config.sources:
+        for model in config.models:
+            directions.extend(
+                _load_source_model_directions(
+                    source=source,
+                    source_root=source_roots[source.name],
+                    model=model,
+                    methods=config.methods,
+                )
+            )
+    lookup = {
+        (direction.representation, direction.model, direction.method): direction
+        for direction in directions
+    }
+    expected = len(config.sources) * len(config.models) * len(config.methods)
+    if len(lookup) != expected:
+        raise RuntimeError(f"Expected {expected} unique selected directions; found {len(lookup)}")
+
+    cosine_rows: list[dict[str, Any]] = []
+    for model in config.models:
+        for row_method in config.methods:
+            row = lookup[(config.row_source, model.name, row_method)]
+            for column_method in config.methods:
+                column = lookup[(config.column_source, model.name, column_method)]
+                if row.vector.shape != column.vector.shape:
+                    raise RuntimeError(
+                        f"Direction dimensions differ for {model.name}: "
+                        f"{row.vector.shape} != {column.vector.shape}"
+                    )
+                cosine_rows.append(
+                    {
+                        "model": model.name,
+                        "row_source": config.row_source,
+                        "row_method": row_method,
+                        "row_layer": row.layer,
+                        "column_source": config.column_source,
+                        "column_method": column_method,
+                        "column_layer": column.layer,
+                        "absolute_cosine": abs(
+                            float(np.clip(row.vector @ column.vector, -1.0, 1.0))
+                        ),
+                    }
+                )
+
+    selections = pd.DataFrame(_selection_rows(directions)).drop(
+        columns=["selection_value_percent"]
+    )
+    absolute_cosines = pd.DataFrame(cosine_rows)
+    output_dir = Path(output_dir)
+    store = RunArtifactStore(output_dir)
+    store.write_rows("selected_direction_audit.csv", selections.to_dict("records"))
+    store.write_rows("absolute_cosines.csv", absolute_cosines.to_dict("records"))
+    store.write_json(
+        "resolved_config.json",
+        {
+            **config.to_dict(),
+            "storage_root": str(Path(storage_root).resolve()),
+            "source_run_roots": {
+                name: str(path.resolve()) for name, path in source_roots.items()
+            },
+        },
+    )
+    return PairwiseDirectionAlignmentResult(
+        selected_directions=selections,
+        absolute_cosines=absolute_cosines,
+        output_dir=output_dir,
+    )
+
+
 __all__ = [
     "DirectionAlignmentConfig",
     "DirectionAlignmentResult",
     "DirectionAlignmentSource",
+    "PairwiseDirectionAlignmentConfig",
+    "PairwiseDirectionAlignmentResult",
     "SelectedDirection",
     "run_direction_alignment_analysis",
+    "run_pairwise_direction_alignment_analysis",
 ]

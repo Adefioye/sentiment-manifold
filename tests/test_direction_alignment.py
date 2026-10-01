@@ -203,12 +203,15 @@ def test_direction_alignment_loads_selected_artifacts_and_computes_three_views(t
 
     paths = plot_direction_alignment(
         result.similarities,
-        result.selected_directions,
         figure_dir=tmp_path / "figures",
         model_names=["gpt2-small"],
         methods=config.methods,
     )
-    assert len(paths) == 6
+    assert [path.name for path in paths] == [
+        "cosine_alignment_within_sentiment.png",
+        "cosine_alignment_within_valence.png",
+        "cosine_alignment_valence_vs_sentiment.png",
+    ]
     assert all(path.is_file() for path in paths)
     plt.close("all")
 

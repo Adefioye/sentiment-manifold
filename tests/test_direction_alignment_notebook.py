@@ -23,12 +23,15 @@ def test_direction_alignment_notebook_is_clean_and_code_compiles():
             compile("".join(cell["source"]), f"{NOTEBOOK_PATH}:cell-{index}", "exec")
 
 
-def test_direction_alignment_notebook_uses_frozen_sources_and_three_views():
+def test_direction_alignment_notebook_uses_absolute_cosine_for_three_views():
     source = "\n".join(
         "".join(cell.get("source", [])) for cell in _notebook()["cells"]
     )
     for required in (
         "configs/sentiment_valence_direction_alignment.yaml",
+        'UPDATE_EXISTING_CHECKOUT = True',
+        '["git", "fetch", "origin", PROJECT_BRANCH]',
+        '["git", "merge", "--ff-only", f"origin/{PROJECT_BRANCH}"]',
         "2026-09-18_20-22_CDT",
         "2026-09-23_09-10_CDT",
         "DirectionAlignmentConfig.load",
@@ -39,9 +42,12 @@ def test_direction_alignment_notebook_uses_frozen_sources_and_three_views():
         '"within_sentiment"',
         '"within_valence"',
         '"valence_vs_sentiment"',
-        '"signed_cosine"',
         '"absolute_cosine"',
+        "Cosine alignment",
         '"figure_manifest.csv"',
         'status="completed"',
     ):
         assert required in source
+    assert '"signed_cosine"' not in source
+    assert '"row_layer"' not in source
+    assert '"column_layer"' not in source

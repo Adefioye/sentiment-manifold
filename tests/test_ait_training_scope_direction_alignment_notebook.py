@@ -37,6 +37,7 @@ def test_notebook_is_limited_to_full_vs_partial_absolute_alignment():
         "PairwiseDirectionAlignmentConfig.load",
         "run_pairwise_direction_alignment_analysis",
         "plot_pairwise_absolute_direction_alignment",
+        "Cosine alignment",
         '["mean_diff", "das"]',
         'row_label="Full AIT"',
         'column_label="Partial AIT"',
@@ -49,3 +50,4 @@ def test_notebook_is_limited_to_full_vs_partial_absolute_alignment():
     assert "logistic_regression" not in source
     assert "signed_cosine" not in source
     assert "selection_value_percent" not in source
+    assert "Absolute-cosine alignment" not in source

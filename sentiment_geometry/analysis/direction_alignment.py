@@ -213,6 +213,66 @@ class PairwiseDirectionAlignmentResult:
     output_dir: Path
 
 
+def load_direction_alignment_result(
+    output_dir: str | Path,
+) -> DirectionAlignmentResult:
+    """Load and validate a previously computed three-view alignment result."""
+
+    output_dir = Path(output_dir)
+    selections = _read_csv(
+        output_dir / "selected_directions.csv",
+        {"representation", "model", "method", "selected_layer", "unit_norm"},
+    )
+    similarities = _read_csv(
+        output_dir / "direction_cosines.csv",
+        {
+            "comparison",
+            "model",
+            "row_method",
+            "column_method",
+            "absolute_cosine",
+        },
+    )
+    same_method = _read_csv(
+        output_dir / "same_method_cross_alignment.csv",
+        {"model", "method", "absolute_cosine"},
+    )
+    return DirectionAlignmentResult(
+        selected_directions=selections,
+        similarities=similarities,
+        same_method_alignment=same_method,
+        output_dir=output_dir,
+    )
+
+
+def load_pairwise_direction_alignment_result(
+    output_dir: str | Path,
+) -> PairwiseDirectionAlignmentResult:
+    """Load and validate a previously computed pairwise alignment result."""
+
+    output_dir = Path(output_dir)
+    selections = _read_csv(
+        output_dir / "selected_direction_audit.csv",
+        {"representation", "model", "method", "selected_layer", "unit_norm"},
+    )
+    absolute_cosines = _read_csv(
+        output_dir / "absolute_cosines.csv",
+        {
+            "model",
+            "row_source",
+            "row_method",
+            "column_source",
+            "column_method",
+            "absolute_cosine",
+        },
+    )
+    return PairwiseDirectionAlignmentResult(
+        selected_directions=selections,
+        absolute_cosines=absolute_cosines,
+        output_dir=output_dir,
+    )
+
+
 def _read_csv(path: Path, required: set[str]) -> pd.DataFrame:
     if not path.is_file():
         raise FileNotFoundError(path)
@@ -652,6 +712,8 @@ __all__ = [
     "PairwiseDirectionAlignmentConfig",
     "PairwiseDirectionAlignmentResult",
     "SelectedDirection",
+    "load_direction_alignment_result",
+    "load_pairwise_direction_alignment_result",
     "run_direction_alignment_analysis",
     "run_pairwise_direction_alignment_analysis",
 ]

@@ -9,6 +9,8 @@ from sentiment_geometry.analysis import (
     DirectionAlignmentConfig,
     DirectionAlignmentSource,
     PairwiseDirectionAlignmentConfig,
+    load_direction_alignment_result,
+    load_pairwise_direction_alignment_result,
     run_direction_alignment_analysis,
     run_pairwise_direction_alignment_analysis,
 )
@@ -201,6 +203,11 @@ def test_direction_alignment_loads_selected_artifacts_and_computes_three_views(t
     ):
         assert (result.output_dir / filename).is_file()
 
+    loaded = load_direction_alignment_result(result.output_dir)
+    pd.testing.assert_frame_equal(loaded.selected_directions, result.selected_directions)
+    pd.testing.assert_frame_equal(loaded.similarities, result.similarities)
+    pd.testing.assert_frame_equal(loaded.same_method_alignment, result.same_method_alignment)
+
     paths = plot_direction_alignment(
         result.similarities,
         figure_dir=tmp_path / "figures",
@@ -316,6 +323,10 @@ def test_pairwise_alignment_computes_only_cross_source_absolute_cosines(tmp_path
         "resolved_config.json",
     ):
         assert (result.output_dir / filename).is_file()
+
+    loaded = load_pairwise_direction_alignment_result(result.output_dir)
+    pd.testing.assert_frame_equal(loaded.selected_directions, result.selected_directions)
+    pd.testing.assert_frame_equal(loaded.absolute_cosines, result.absolute_cosines)
 
     path = plot_pairwise_absolute_direction_alignment(
         result.absolute_cosines,

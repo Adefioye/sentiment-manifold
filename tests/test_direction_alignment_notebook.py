@@ -29,13 +29,17 @@ def test_direction_alignment_notebook_uses_absolute_cosine_for_three_views():
     )
     for required in (
         "configs/sentiment_valence_direction_alignment.yaml",
+        'RESUME_RUN_ID = "2026-09-24_09-15_CDT"',
+        "RUN_ANALYSIS = False",
         'UPDATE_EXISTING_CHECKOUT = True',
         '["git", "fetch", "origin", PROJECT_BRANCH]',
         '["git", "merge", "--ff-only", f"origin/{PROJECT_BRANCH}"]',
         "2026-09-18_20-22_CDT",
         "2026-09-23_09-10_CDT",
         "DirectionAlignmentConfig.load",
+        "load_direction_alignment_result",
         "run_direction_alignment_analysis",
+        "open_timestamped_run",
         "plot_direction_alignment",
         'REPRESENTATION_ORDER = ["sentiment", "valence"]',
         'COMPARISON_LABELS = {',

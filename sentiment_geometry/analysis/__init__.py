@@ -7,6 +7,8 @@ from .direction_alignment import (
     PairwiseDirectionAlignmentConfig,
     PairwiseDirectionAlignmentResult,
     SelectedDirection,
+    load_direction_alignment_result,
+    load_pairwise_direction_alignment_result,
     run_direction_alignment_analysis,
     run_pairwise_direction_alignment_analysis,
 )
@@ -20,6 +22,8 @@ __all__ = [
     "PairwiseDirectionAlignmentResult",
     "SelectedDirection",
     "cosine_similarity_table",
+    "load_direction_alignment_result",
+    "load_pairwise_direction_alignment_result",
     "projection_accuracy",
     "projection_threshold",
     "run_direction_alignment_analysis",

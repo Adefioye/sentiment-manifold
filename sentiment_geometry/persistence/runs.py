@@ -69,6 +69,51 @@ class TimestampedRunLayout:
         return self.manifest_path
 
 
+def open_timestamped_run(
+    storage_root: str | Path,
+    *,
+    experiment_name: str,
+    run_id: str,
+) -> TimestampedRunLayout:
+    """Open an existing run layout without changing its manifest or directories."""
+
+    experiment_name = _validated_segment(experiment_name, field_name="experiment_name")
+    run_id = _validated_segment(run_id, field_name="run_id")
+    root = (
+        Path(storage_root).expanduser().resolve()
+        / experiment_name
+        / "runs"
+        / run_id
+    )
+    manifest_path = root / "run_manifest.json"
+    if not root.is_dir() or not manifest_path.is_file():
+        raise FileNotFoundError(f"Cannot open run without its manifest: {root}")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("experiment_name") != experiment_name:
+        raise ValueError(
+            f"Run {run_id!r} belongs to {manifest.get('experiment_name')!r}, "
+            f"not {experiment_name!r}"
+        )
+    results_dir = root / "results"
+    directions_dir = root / "directions"
+    figures_dir = root / "figures"
+    missing = [path for path in (results_dir, directions_dir, figures_dir) if not path.is_dir()]
+    if missing:
+        raise FileNotFoundError(f"Run {run_id!r} is missing directories: {missing}")
+    return TimestampedRunLayout(
+        experiment_name=experiment_name,
+        run_id=run_id,
+        timezone_name=str(manifest["timezone"]),
+        started_at=str(manifest["started_at"]),
+        started_at_utc=str(manifest["started_at_utc"]),
+        root=root,
+        results_dir=results_dir,
+        directions_dir=directions_dir,
+        figures_dir=figures_dir,
+        resumed=True,
+    )
+
+
 def prepare_timestamped_run(
     storage_root: str | Path,
     *,
@@ -165,4 +210,4 @@ def prepare_timestamped_run(
     return layout
 
 
-__all__ = ["TimestampedRunLayout", "prepare_timestamped_run"]
+__all__ = ["TimestampedRunLayout", "open_timestamped_run", "prepare_timestamped_run"]

@@ -35,7 +35,9 @@ def test_notebook_is_limited_to_full_vs_partial_absolute_alignment():
         "2026-09-23_02-47_CDT",
         "2026-09-23_09-10_CDT",
         "PairwiseDirectionAlignmentConfig.load",
+        "load_pairwise_direction_alignment_result",
         "run_pairwise_direction_alignment_analysis",
+        "open_timestamped_run",
         "plot_pairwise_absolute_direction_alignment",
         "Cosine alignment",
         '["mean_diff", "das"]',
@@ -44,6 +46,7 @@ def test_notebook_is_limited_to_full_vs_partial_absolute_alignment():
         '"partial_ait": "ait_test"',
         '"full_ait": "ait_eval"',
         "Stale alignment configuration in the Colab checkout",
+        "RUN_ANALYSIS = False",
         'status="completed"',
     ):
         assert required in source

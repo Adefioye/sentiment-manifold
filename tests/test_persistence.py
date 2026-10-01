@@ -7,6 +7,7 @@ import pytest
 from sentiment_geometry.experiments.reproduction import ReproductionConfig
 from sentiment_geometry.persistence import (
     checkpoint_variant_dir,
+    open_timestamped_run,
     prepare_timestamped_run,
     resolve_checkpoint_dir,
     resolve_output_dir,
@@ -122,6 +123,25 @@ def test_timestamped_run_refuses_implicit_overwrite_and_supports_explicit_resume
     assert resumed.resumed is True
     assert resumed.timezone_name == "UTC"
     assert json.loads(resumed.manifest_path.read_text())["status"] == "resumed"
+
+
+def test_open_timestamped_run_is_read_only(tmp_path):
+    original = prepare_timestamped_run(
+        tmp_path,
+        experiment_name="direction-alignment",
+        now=datetime(2026, 1, 4, 16, 7, tzinfo=timezone.utc),
+    )
+    manifest_before = original.manifest_path.read_text(encoding="utf-8")
+
+    opened = open_timestamped_run(
+        tmp_path,
+        experiment_name="direction-alignment",
+        run_id=original.run_id,
+    )
+
+    assert opened.root == original.root
+    assert opened.resumed is True
+    assert opened.manifest_path.read_text(encoding="utf-8") == manifest_before
 
 
 @pytest.mark.parametrize("run_id", ["../escape", "nested/run", ".", "with spaces"])

@@ -223,8 +223,10 @@ def test_pairwise_alignment_config_pins_partial_and_full_ait_runs():
     sources = {source.name: source for source in config.sources}
     assert sources["partial_ait"].experiment_name == "ait-last-token-directions"
     assert sources["partial_ait"].run_id == "2026-09-23_02-47_CDT"
+    assert sources["partial_ait"].selection_dataset == "ait_test"
     assert sources["full_ait"].experiment_name == "full-ait-last-token-directions"
     assert sources["full_ait"].run_id == "2026-09-23_09-10_CDT"
+    assert sources["full_ait"].selection_dataset == "ait_eval"
 
 
 def test_pairwise_alignment_computes_only_cross_source_absolute_cosines(tmp_path):
@@ -234,7 +236,7 @@ def test_pairwise_alignment_computes_only_cross_source_absolute_cosines(tmp_path
             experiment_name="ait-last-token-directions",
             run_id="partial-run",
             fit_position="final",
-            selection_dataset="ait_eval",
+            selection_dataset="ait_test",
             selection_metric="logit_flip_percent",
             evaluation_dataset="ait_test",
             expected_domain="ait_valence",

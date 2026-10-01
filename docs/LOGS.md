@@ -34,9 +34,12 @@ logs under Google Drive run `full-ait-last-token-directions/runs/2026-09-23_09-1
 valence directions for GPT-2 Small and Qwen3-0.6B Base across all non-embedding residual
 boundaries using each model's tokenizer-matched AIT data.
 
-**Protocol:** Use 55 training examples, 30 validation directed cases, and 30 locked-test directed
-cases per model. Validation selects the DAS epoch and the best layer for every method by
-`logit_flip_percent`; test data is opened only for final logit-flip and sign-flip evaluation.
+**Protocol discrepancy:** The frozen run used 55 training examples, 30 validation directed cases,
+and 30 test directed cases per model. Its archived executed notebook and saved selection tables show
+that validation selected the DAS epoch, while `ait_test` selected the best layer for every method by
+`logit_flip_percent`; the test results are therefore selection results, not locked final estimates.
+The source notebook and configuration were changed at 05:06 CDT to select layers on validation, but
+that later change did not retroactively alter the `2026-09-23_02-47_CDT` artifacts.
 
 **Primary entry point:** `notebooks/06_colab_train_ait_last_token_directions.ipynb`
 

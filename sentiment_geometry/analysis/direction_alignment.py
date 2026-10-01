@@ -307,13 +307,19 @@ def _load_source_model_directions(
         raise RuntimeError(
             f"{source.name}/{model.name} does not contain one frozen row per method"
         )
-    if set(frozen["selection_dataset"]) != {source.selection_dataset}:
+    observed_selection_datasets = set(frozen["selection_dataset"].astype(str))
+    if observed_selection_datasets != {source.selection_dataset}:
         raise RuntimeError(
-            f"{source.name}/{model.name} has unexpected selection-dataset provenance"
+            f"{source.name}/{model.name} selection-dataset provenance is "
+            f"{sorted(observed_selection_datasets)}, expected "
+            f"{source.selection_dataset!r}"
         )
-    if set(frozen["selection_metric"]) != {source.selection_metric}:
+    observed_selection_metrics = set(frozen["selection_metric"].astype(str))
+    if observed_selection_metrics != {source.selection_metric}:
         raise RuntimeError(
-            f"{source.name}/{model.name} has unexpected selection-metric provenance"
+            f"{source.name}/{model.name} selection-metric provenance is "
+            f"{sorted(observed_selection_metrics)}, expected "
+            f"{source.selection_metric!r}"
         )
 
     loaded: list[SelectedDirection] = []

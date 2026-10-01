@@ -29,6 +29,9 @@ def test_notebook_is_limited_to_full_vs_partial_absolute_alignment():
     )
     for required in (
         "configs/ait_training_scope_direction_alignment.yaml",
+        'UPDATE_EXISTING_CHECKOUT = True',
+        '["git", "fetch", "origin", PROJECT_BRANCH]',
+        '["git", "merge", "--ff-only", f"origin/{PROJECT_BRANCH}"]',
         "2026-09-23_02-47_CDT",
         "2026-09-23_09-10_CDT",
         "PairwiseDirectionAlignmentConfig.load",
@@ -37,6 +40,9 @@ def test_notebook_is_limited_to_full_vs_partial_absolute_alignment():
         '["mean_diff", "das"]',
         'row_label="Full AIT"',
         'column_label="Partial AIT"',
+        '"partial_ait": "ait_test"',
+        '"full_ait": "ait_eval"',
+        "Stale alignment configuration in the Colab checkout",
         'status="completed"',
     ):
         assert required in source

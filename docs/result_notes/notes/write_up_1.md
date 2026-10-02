@@ -38,3 +38,23 @@ ToyMovieReview ADJ, and SST. Each point is evaluated using the layer selected by
 *Figure 4. Qwen3-0.6B Base literal sign-flip performance at the same frozen ADVRB-selected layers
 used in Figure 3. The ADVRB panels are selection-set results, while the ADJ and SST panels report
 performance after the selected layers have been frozen.*
+
+## Research question 2: Is there a universal sentiment direction?
+- Plan
+    - Brief reason for asking question? 
+    - Datasets and methodology
+    - Results and analysis. Here we just focus mostly on sign flip accuracy of the 2 models and 2 methods(mean difference and DAS). Show how they perform on external datasets. Second, we report geometrical alignment both within datasets and cross-dataset.
+
+In Tigges et al., a single direction in the activation space of a model was shown to have generalize to several OOD dataset. Here, we ask, even for the same model, is it possible to get geometrically aligned sentiment directions that have the same causal behavior on the model?
+
+### Datasets and methodology
+We reused the best sentiment directions on gpt2-small and qwen-0.6b obtained from learning on ToyMovieReview datasets. Subsequently, we used SemEval-2018 Task 1, Affect in Tweets(AIT) dataset. This dataset originally has 7 ordinal labels(-3, -2, -1, 0, 1, 2, 3). We removed samples with zero label and then collapsed all positive and negative labels as positive and negative sentiment respectively. We then trimmed the data down further to pairs of positive and negative sentences with equal token length under target model's tokenizer. For partial AIT data, we used 55, 30, 30 as train, validation and test data respectively for both models. For full AIT data, we used 642, 198, 548 for gpt2-small and 646, 236 and 548 for qwen-0.6b as train, validation and test data respectively.
+
+We had decided to use the same amount of training samples for partial AIT in order to have a fair comparison with ToyMovieReview dataset.
+
+>NOTE: For all the datasets, we have a concept of matched pairs and directed pairs. Each matched pair is a set of positive and negative prompt while directed pair is still a set of positive and negative prompt but with different orientation especially as it comes to directional intervention. We either have a positive->negative intervention or negative->positive intervention
+
+### Results and Discussions
+
+
+## References

@@ -6,6 +6,9 @@ from sentiment_geometry.experiments import AITValenceTransferConfig
 
 PROJECT_ROOT = Path(__file__).parents[1]
 CONFIG_PATH = PROJECT_ROOT / "configs/ait_valence_transfer_evaluation.yaml"
+PARTIAL_CONFIG_PATH = (
+    PROJECT_ROOT / "configs/partial_ait_valence_transfer_evaluation.yaml"
+)
 
 
 def test_ait_transfer_config_locks_source_selection_and_patch_protocol():
@@ -82,3 +85,19 @@ def test_ait_transfer_config_supports_a_single_model_first_stage(tmp_path):
     assert [model.name for model in config.models] == ["gpt2-small"]
     assert config.models[0].batch_size == 16
     assert config.reuse_completed_models == []
+
+
+def test_partial_ait_transfer_config_preserves_archived_test_selection():
+    config = AITValenceTransferConfig.load(PARTIAL_CONFIG_PATH)
+
+    assert config.source_experiment_name == "ait-last-token-directions"
+    assert config.source_run_id == "2026-09-23_02-47_CDT"
+    assert config.output_experiment_name == "partial-ait-valence-ood-evaluation"
+    assert config.selection_dataset == "ait_test"
+    assert config.source_evaluation_dataset == "ait_test"
+    assert config.require_completed_source_status is True
+    assert config.methods == ["mean_diff", "das"]
+    assert config.method_patch_positions == {
+        "mean_diff": "final",
+        "das": "all",
+    }

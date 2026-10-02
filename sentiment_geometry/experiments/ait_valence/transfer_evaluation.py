@@ -22,7 +22,7 @@ from ..sentiment_position.frozen_evaluation import (
 
 @dataclass
 class AITValenceTransferConfig:
-    """Reusable plan for evaluating validation-selected AIT directions OOD."""
+    """Reusable plan for evaluating frozen AIT directions OOD."""
 
     source_experiment_name: str
     source_run_id: str
@@ -140,7 +140,7 @@ class AITValenceTransferConfig:
         *,
         source_run_id: str | None = None,
     ) -> Path:
-        """Resolve the completed full-AIT run under a storage root."""
+        """Resolve the configured AIT source run under a storage root."""
 
         run_id = source_run_id or self.source_run_id
         if not run_id:

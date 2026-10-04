@@ -6,6 +6,25 @@ We used the same ToyMovieReview datasets used in Tigges et al. and then learn di
 
 In addition to the logit flip accuracy, we introduced a new acuuracy metric called the `literal sign flip` accuracy metric. This helps us to quantify how much of the data samples cross zero in either directions(positive and negative).
 
+$$
+\operatorname{SFA}
+= \frac{100}{N}\sum_{i=1}^{N}
+\mathbf{1}\!\left[
+\Delta_{i}^{\mathrm{corr}}\Delta_{i}^{\mathrm{patch}} < 0
+\;\land\;
+y_i\Delta_{i}^{\mathrm{patch}} > 0
+\right],
+\qquad
+\Delta_i^{(s)} = z_{i,+}^{(s)} - z_{i,-}^{(s)}.
+\tag{1}
+$$
+
+Here, $N$ is the number of directed cases, $\Delta_i^{\mathrm{corr}}$ and
+$\Delta_i^{\mathrm{patch}}$ are the positive-minus-negative logit differences before and after
+the intervention, respectively, and $y_i \in \{-1,+1\}$ is the target sentiment polarity. The
+first condition requires a strict crossing of zero, while the second requires the post-intervention
+logit difference to end on the target side.
+
 ### Results and Analysis
 
 #### GPT-2 Small & Qwen3-0.6b model
@@ -50,11 +69,39 @@ In Tigges et al., a single direction in the activation space of a model was show
 ### Datasets and methodology
 We reused the best sentiment directions on gpt2-small and qwen-0.6b obtained from learning on ToyMovieReview datasets. Subsequently, we used SemEval-2018 Task 1, Affect in Tweets(AIT) dataset. This dataset originally has 7 ordinal labels(-3, -2, -1, 0, 1, 2, 3). We removed samples with zero label and then collapsed all positive and negative labels as positive and negative sentiment respectively. We then trimmed the data down further to pairs of positive and negative sentences with equal token length under target model's tokenizer. For partial AIT data, we used 55, 30, 30 as train, validation and test data respectively for both models. For full AIT data, we used 642, 198, 548 for gpt2-small and 646, 236 and 548 for qwen-0.6b as train, validation and test data respectively.
 
-We had decided to use the same amount of training samples for partial AIT in order to have a fair comparison with ToyMovieReview dataset.
+We had decided to train on a subset of AIT data that has the same amount of training samples for partial AIT in order to have a fair comparison with ToyMovieReview dataset.
 
 >NOTE: For all the datasets, we have a concept of matched pairs and directed pairs. Each matched pair is a set of positive and negative prompt while directed pair is still a set of positive and negative prompt but with different orientation especially as it comes to directional intervention. We either have a positive->negative intervention or negative->positive intervention
 
 ### Results and Discussions
+We tested the best directions trained on ToyMovieReview, partial and full AIT datasets on OOD datasets and recorded the sign-flip accuracy. For gpt2-small, the accuracy was very low. However, for qwen-0.6b, the accuracy were high, usually above 50% with almost complete saturation for Full AIT datasets. Surprisingly, the sentiment directions trained on partial and full AIT datasets do have similar accuracy or causal behavior on the evaluated datasets.
+
+
+| Training dataset | Method | SST | IMDb | DynaSent R1 | DynaSent R2 |
+| --- | --- | ---: | ---: | ---: | ---: |
+| ToyMovieReview | Mean Difference | 0.0 | 1.1 | 0.0 | 0.0 |
+| ToyMovieReview | DAS (1D) | 0.0 | 1.2 | 0.0 | 0.0 |
+| Partial AIT | Mean Difference | 0.0 | 0.0 | 0.0 | 0.0 |
+| Partial AIT | DAS (1D) | 0.7 | 12.1 | 3.8 | 0.0 |
+| Full AIT | Mean Difference | 0.0 | 0.4 | 0.0 | 0.0 |
+| Full AIT | DAS (1D) | 4.6 | 17.3 | 2.5 | 6.1 |
+
+*Table 1. GPT-2 Small literal sign-flip accuracy (%) for the frozen best-layer directions on four out-of-distribution datasets.*
+
+| Training dataset | Method | SST | IMDb | DynaSent R1 | DynaSent R2 |
+| --- | --- | ---: | ---: | ---: | ---: |
+| ToyMovieReview | Mean Difference | 69.9 | 71.7 | 50.0 | 64.7 |
+| ToyMovieReview | DAS (1D) | 58.3 | 51.8 | 38.7 | 44.1 |
+| Partial AIT | Mean Difference | 81.1 | 80.0 | 68.8 | 73.5 |
+| Partial AIT | DAS (1D) | 93.4 | 96.1 | 82.5 | 95.6 |
+| Full AIT | Mean Difference | 79.1 | 82.6 | 72.5 | 79.4 |
+| Full AIT | DAS (1D) | 93.7 | 96.3 | 82.5 | 95.6 |
+
+*Table 2. Qwen3-0.6B Base literal sign-flip accuracy (%) for the frozen best-layer directions on four out-of-distribution datasets.*
+
+With regards to accuracy results, we can infer that different sentiment directions trained on different datasets have different causal behavior. Due to this, we then ask if this differences is correlated to the difference in geometrical alignment of the sentiment directions.
+
+
 
 
 ## References

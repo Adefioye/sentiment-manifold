@@ -10,6 +10,7 @@ outputs/**/directions/
 outputs/**/trial_directions/
 data/processed/
 notebooks/rq2-data-exploration/
+docs/result_notes/
 
 # Local-only research instructions.
 .claude/skills/sentiment-research/

@@ -1,17 +1,19 @@
 seed: 0
 
-# Set these boundaries before a reportable run, or pass
-# --layer gpt2-small=N --layer qwen-0.6b=M on the command line.
 models:
   - name: gpt2-small
-    layer: null
+    layers:
+      toy_movie_review: 10
+      full_ait: 11
     revision: 607a30d783dfa663caf39e06633721c8d4cfcd7e
     prepend_bos: true
     device: auto
     dtype: auto
     batch_size: 16
   - name: qwen-0.6b
-    layer: null
+    layers:
+      toy_movie_review: 26
+      full_ait: 26
     revision: da87bfb608c14b7cf20ba1ce41287e8de496c0cd
     prepend_bos: false
     device: auto
@@ -51,5 +53,10 @@ hyperparameter_files:
 
 output:
   output_dir: outputs/fixed-layer-selectivity
+  run_id: null
   cache_activations: true
   save_predictions: true
+
+progress:
+  enabled: true
+  leave_completed: false

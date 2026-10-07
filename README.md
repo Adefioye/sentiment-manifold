@@ -26,10 +26,8 @@ sentiment-geometry plot --run-dir outputs/results/gpt2-small
 # AIT valence directions with deterministic train/eval/test roles
 sentiment-geometry train-ait-valence --config configs/ait_valence_directions.yaml
 
-# After freezing one residual boundary per model
-sentiment-geometry fixed-layer-selectivity \
-  --layer gpt2-small=YOUR_GPT2_BOUNDARY \
-  --layer qwen-0.6b=YOUR_QWEN_BOUNDARY
+# Run the frozen dataset-specific boundaries from the selectivity config
+sentiment-geometry fixed-layer-selectivity
 ```
 
 Choose the AIT representation explicitly with `--mean-pool` or `--last-token`.
@@ -71,7 +69,11 @@ Compare the frozen best-layer ToyMovieReview sentiment and full-AIT valence dire
 - **Sentiment-manifold research program:**
   [research questions, methodology, diagnostics, and roadmap](docs/rq-sentiment-manifolds/README.md).
 - **Fixed-layer random-label selectivity:**
-  [native/midpoint probe and DAS protocol](docs/fixed-layer-selectivity.md).
+  [native/midpoint probe and DAS protocol](docs/fixed-layer-selectivity.md), with separate
+  [mean-difference](notebooks/12_colab_fixed_layer_mean_difference_selectivity.ipynb),
+  [logistic-regression](notebooks/13_colab_fixed_layer_logistic_regression_selectivity.ipynb),
+  [DAS](notebooks/14_colab_fixed_layer_das_selectivity.ipynb), and
+  [MLP-1](notebooks/15_colab_fixed_layer_mlp1_selectivity.ipynb) Colab notebooks.
 - **Code organization:** [domain boundaries and dependency rules](docs/ARCHITECTURE.md).
 
 Planned work will keep separate research-question directories for geometric alignment between

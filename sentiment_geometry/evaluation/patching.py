@@ -8,6 +8,7 @@ from dataclasses import dataclass
 import numpy as np
 import torch
 from torch import Tensor
+from tqdm.auto import tqdm
 
 from ..datasets.types import CounterfactualPair
 from ..interventions import directional_replace
@@ -151,12 +152,18 @@ class DirectionalPatchingEvaluator:
         answers: dict[int, tuple[str, ...] | list[str]],
         position: str,
         batch_size: int = 16,
+        show_progress: bool = False,
+        progress_description: str | None = None,
+        progress_leave: bool = False,
     ) -> None:
         if not pairs:
             raise ValueError("Directional patching requires non-empty pairs")
         self.adapter = adapter
         self.layer = layer
         self.position = position
+        self.show_progress = show_progress
+        self.progress_description = progress_description or "Directional patching"
+        self.progress_leave = progress_leave
         self.answer_ids = {
             label: torch.tensor(
                 [adapter.single_token_id(answer) for answer in values],
@@ -174,7 +181,16 @@ class DirectionalPatchingEvaluator:
     ) -> tuple[_PreparedPatchingBatch, ...]:
         prepared: list[_PreparedPatchingBatch] = []
         device = self.adapter.device_spec.device
-        for start in range(0, len(pairs), batch_size):
+        starts = range(0, len(pairs), batch_size)
+        batches = tqdm(
+            starts,
+            total=len(starts),
+            desc=f"{self.progress_description} baselines",
+            leave=self.progress_leave,
+            disable=not self.show_progress,
+            unit="batch",
+        )
+        for start in batches:
             selected = tuple(pairs[start : start + batch_size])
             clean = self.adapter.tokenize([pair.clean for pair in selected]).to(device)
             corrupted = self.adapter.tokenize([pair.corrupted for pair in selected]).to(device)
@@ -217,7 +233,14 @@ class DirectionalPatchingEvaluator:
             )
         return tuple(prepared)
 
-    def evaluate(self, direction: np.ndarray) -> PatchingResult:
+    def evaluate(
+        self,
+        direction: np.ndarray,
+        *,
+        show_progress: bool | None = None,
+        progress_description: str | None = None,
+        progress_leave: bool | None = None,
+    ) -> PatchingResult:
         vector = torch.as_tensor(
             direction, device=self.adapter.device_spec.device, dtype=torch.float32
         )
@@ -231,7 +254,18 @@ class DirectionalPatchingEvaluator:
         flips: list[Tensor] = []
         records: list[dict] = []
 
-        for batch in self.batches:
+        enabled = self.show_progress if show_progress is None else show_progress
+        description = progress_description or self.progress_description
+        leave = self.progress_leave if progress_leave is None else progress_leave
+        batches = tqdm(
+            self.batches,
+            total=len(self.batches),
+            desc=f"{description} patch",
+            leave=leave,
+            disable=not enabled,
+            unit="batch",
+        )
+        for batch in batches:
             editor = _directional_editor(
                 self.adapter,
                 clean=batch.clean,

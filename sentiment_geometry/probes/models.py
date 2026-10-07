@@ -13,6 +13,7 @@ from numpy.typing import NDArray
 from sklearn.linear_model import LogisticRegression
 from torch import Tensor, nn
 from torch.utils.data import DataLoader, TensorDataset
+from tqdm.auto import tqdm
 
 FloatArray = NDArray[np.floating]
 IntArray = NDArray[np.integer]
@@ -73,6 +74,7 @@ class _MeanDifferenceProbe:
 @dataclass(frozen=True)
 class LogisticProbeConfig:
     c: float = 1.0
+    penalty: str = "l2"
     solver: str = "liblinear"
     max_iter: int = 5000
     tol: float = 1e-4
@@ -137,6 +139,7 @@ def fit_logistic_probe(
     x, y = _validate(activations, labels)
     model = LogisticRegression(
         C=config.c,
+        penalty=config.penalty,
         solver=config.solver,
         max_iter=config.max_iter,
         tol=config.tol,
@@ -244,6 +247,9 @@ def fit_mlp1_probe(
     config: MLP1ProbeConfig,
     seed: int,
     select_final_checkpoint: bool = False,
+    show_progress: bool = False,
+    progress_description: str | None = None,
+    progress_leave: bool = False,
 ) -> BinaryProbe:
     train_x, train_y = _validate(training_activations, training_labels)
     validation_x, validation_y = _validate(validation_activations, validation_labels)
@@ -275,7 +281,14 @@ def fit_mlp1_probe(
     best_state: dict[str, Tensor] | None = None
     stale_epochs = 0
     history: list[dict[str, float | int]] = []
-    for epoch in range(config.max_epochs):
+    epoch_progress = tqdm(
+        range(config.max_epochs),
+        desc=progress_description or "Train MLP-1",
+        leave=progress_leave,
+        disable=not show_progress,
+        unit="epoch",
+    )
+    for epoch in epoch_progress:
         network.train()
         total_loss = 0.0
         for batch_x, batch_y in loader:
@@ -294,12 +307,12 @@ def fit_mlp1_probe(
                 "validation_loss": validation_loss,
             }
         )
+        should_stop = False
         if select_final_checkpoint:
             best_loss = validation_loss
             best_epoch = epoch
             best_state = copy.deepcopy(network.state_dict())
-            continue
-        if validation_loss < best_loss - config.min_delta:
+        elif validation_loss < best_loss - config.min_delta:
             best_loss = validation_loss
             best_epoch = epoch
             best_state = copy.deepcopy(network.state_dict())
@@ -307,7 +320,15 @@ def fit_mlp1_probe(
         else:
             stale_epochs += 1
             if stale_epochs >= config.patience:
-                break
+                should_stop = True
+        epoch_progress.set_postfix(
+            train_loss=f"{history[-1]['training_loss']:.4f}",
+            val_loss=f"{validation_loss:.4f}",
+            best_epoch=best_epoch,
+        )
+        if should_stop:
+            break
+    epoch_progress.close()
     if best_state is None:
         raise RuntimeError("MLP-1 training did not produce a finite validation checkpoint")
     network.load_state_dict(best_state)

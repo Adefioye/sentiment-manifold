@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
@@ -11,14 +11,19 @@ from typing import Any, Mapping
 import numpy as np
 import pandas as pd
 import torch
+from tqdm.auto import tqdm
 
 from ...activations import extract_last_token_activations
 from ...evaluation import DirectionalPatchingEvaluator, PatchingResult
 from ...models import CausalLMAdapter, clear_device_cache, resolve_device
 from ...persistence import RunArtifactStore
-from ...probes import BinaryProbe, evaluate_binary_probe, fit_mean_difference_probe
+from ...probes import BinaryProbe, evaluate_binary_probe
 from ...probes.metrics import midpoint_threshold
-from .config import FixedLayerModelConfig, FixedLayerSelectivityConfig
+from .config import (
+    DASSelectivityConfig,
+    FixedLayerModelConfig,
+    FixedLayerSelectivityConfig,
+)
 from .datasets import (
     PreparedSelectivityData,
     RandomizedSelectivityData,
@@ -29,6 +34,7 @@ from .datasets import (
 from .fitting import (
     fit_final_token_das,
     fit_selected_control_probe,
+    fit_selected_real_probe,
     select_logistic_probe,
     select_mlp1_probe,
 )
@@ -44,6 +50,10 @@ def _run_name() -> str:
 
 def _float(value: float) -> float | None:
     return None if not np.isfinite(value) else float(value)
+
+
+def _finite_or_negative_infinity(value: float) -> float:
+    return float(value) if np.isfinite(value) else float("-inf")
 
 
 def _balanced_accuracy(labels: np.ndarray, predictions: np.ndarray) -> float:
@@ -67,7 +77,9 @@ class FixedLayerSelectivityExperiment:
         self.config = config
 
     def run(self) -> Path:
-        run_dir = Path(self.config.output.output_dir) / _run_name()
+        run_dir = Path(self.config.output.output_dir) / (
+            self.config.output.run_id or _run_name()
+        )
         store = RunArtifactStore(run_dir)
         store.write_json("resolved_config.json", self.config.to_dict())
         all_tables: dict[str, list[dict[str, Any]]] = {
@@ -80,30 +92,51 @@ class FixedLayerSelectivityExperiment:
             "sample_manifest": [],
             "pair_manifest": [],
             "fit_metadata": [],
+            "tuning_trials": [],
+            "training_history": [],
         }
         runtime_rows: list[dict[str, Any]] = []
-        for model in self.config.models:
+        models = tqdm(
+            self.config.models,
+            desc="Selectivity models",
+            leave=True,
+            disable=not self.config.progress.enabled,
+            unit="model",
+        )
+        for model in models:
+            models.set_postfix(model=model.name)
             adapter = CausalLMAdapter.from_pretrained(
                 model.hub_name,
                 resolve_device(model.device, model.dtype),
                 revision=model.revision,
                 prepend_bos=model.prepend_bos,
             )
-            assert model.layer is not None
-            if model.layer > adapter.n_layers:
-                raise ValueError(
-                    f"{model.name} layer {model.layer} exceeds boundary {adapter.n_layers}"
-                )
-            runtime_rows.append(
-                {
-                    "model": model.name,
-                    "layer": model.layer,
-                    **adapter.provenance(),
-                }
+            datasets = tqdm(
+                self.config.data.datasets,
+                desc=f"{model.name} datasets",
+                leave=self.config.progress.leave_completed,
+                disable=not self.config.progress.enabled,
+                unit="dataset",
             )
-            for dataset_name in self.config.data.datasets:
-                data = self._prepare_data(dataset_name, model, adapter)
-                self._run_dataset(model, adapter, data, run_dir, all_tables)
+            for dataset_name in datasets:
+                datasets.set_postfix(dataset=dataset_name)
+                layer = model.layer_for(dataset_name)
+                if layer > adapter.n_layers:
+                    raise ValueError(
+                        f"{model.name}/{dataset_name} layer {layer} exceeds boundary "
+                        f"{adapter.n_layers}"
+                    )
+                dataset_model = replace(model, layer=layer)
+                runtime_rows.append(
+                    {
+                        "model": model.name,
+                        "dataset": dataset_name,
+                        "layer": layer,
+                        **adapter.provenance(),
+                    }
+                )
+                data = self._prepare_data(dataset_name, dataset_model, adapter)
+                self._run_dataset(dataset_model, adapter, data, run_dir, all_tables)
             del adapter
             clear_device_cache()
         for filename, rows in all_tables.items():
@@ -135,15 +168,19 @@ class FixedLayerSelectivityExperiment:
         tables: dict[str, list[dict[str, Any]]],
     ) -> None:
         assert model.layer is not None
-        activations = {
-            role: extract_last_token_activations(
+        activations: dict[str, np.ndarray] = {}
+        for role, rows in data.examples.items():
+            activations[role] = extract_last_token_activations(
                 adapter,
                 rows,
                 model.layer,
                 batch_size=model.batch_size,
+                show_progress=self.config.progress.enabled,
+                progress_description=(
+                    f"{model.name} {data.name} {role} activations"
+                ),
+                progress_leave=self.config.progress.leave_completed,
             )
-            for role, rows in data.examples.items()
-        }
         if self.config.output.cache_activations:
             cache_dir = run_dir / "activations" / model.name
             cache_dir.mkdir(parents=True, exist_ok=True)
@@ -163,7 +200,41 @@ class FixedLayerSelectivityExperiment:
         tables["sample_manifest"].extend(data.sample_manifest)
         tables["pair_manifest"].extend(data.pair_manifest)
         real_labels = {role: _labels(rows) for role, rows in data.examples.items()}
-        for run_seed in self.config.random_labels.seeds:
+        selected_settings: dict[str, Any] = {}
+        methods = tqdm(
+            self.config.methods,
+            desc=f"{model.name} {data.name} tune",
+            leave=self.config.progress.leave_completed,
+            disable=not self.config.progress.enabled,
+            unit="method",
+        )
+        for method in methods:
+            methods.set_postfix(method=method)
+            if method == "das":
+                selected_settings[method] = self._tune_das(
+                    model=model,
+                    adapter=adapter,
+                    data=data,
+                    tables=tables,
+                )
+            else:
+                selected_settings[method] = self._tune_probe(
+                    model=model,
+                    data=data,
+                    activations=activations,
+                    real_labels=real_labels,
+                    method=method,
+                    tables=tables,
+                )
+        seeds = tqdm(
+            self.config.random_labels.seeds,
+            desc=f"{model.name} {data.name} paired seeds",
+            leave=self.config.progress.leave_completed,
+            disable=not self.config.progress.enabled,
+            unit="seed",
+        )
+        for run_seed in seeds:
+            seeds.set_postfix(seed=run_seed)
             randomized = randomize_data(data, seed=run_seed)
             random_labels = {
                 role: _labels(rows) for role, rows in randomized.examples.items()
@@ -204,6 +275,7 @@ class FixedLayerSelectivityExperiment:
                         run_seed=run_seed,
                         run_dir=run_dir,
                         tables=tables,
+                        selected_config=selected_settings[method],
                     )
                 else:
                     self._run_probe(
@@ -216,40 +288,60 @@ class FixedLayerSelectivityExperiment:
                         run_seed=run_seed,
                         run_dir=run_dir,
                         tables=tables,
+                        hyperparameters=selected_settings[method],
                     )
 
-    def _select_real_probe(
+    def _tune_probe(
         self,
+        *,
+        model: FixedLayerModelConfig,
+        data: PreparedSelectivityData,
         method: str,
         activations: Mapping[str, np.ndarray],
-        labels: Mapping[str, np.ndarray],
-        *,
-        seed: int,
-    ):
+        real_labels: Mapping[str, np.ndarray],
+        tables: dict[str, list[dict[str, Any]]],
+    ) -> dict[str, Any]:
         if method == "mean_diff":
-            probe = fit_mean_difference_probe(activations["train"], labels["train"])
-            return probe, {}
+            return {}
         if method == "logistic_regression":
             selected = select_logistic_probe(
                 activations["train"],
-                labels["train"],
+                real_labels["train"],
                 activations["validation"],
-                labels["validation"],
+                real_labels["validation"],
                 search=self.config.logistic_regression,
-                seed=seed,
+                seed=self.config.seed,
             )
-            return selected.probe, selected.hyperparameters
-        if method == "mlp1":
+        elif method == "mlp1":
             selected = select_mlp1_probe(
                 activations["train"],
-                labels["train"],
+                real_labels["train"],
                 activations["validation"],
-                labels["validation"],
+                real_labels["validation"],
                 search=self.config.mlp1,
-                seed=seed,
+                seed=self.config.seed,
+                show_progress=self.config.progress.enabled,
+                progress_description=f"{model.name} {data.name} MLP-1 tune",
+                progress_leave=self.config.progress.leave_completed,
             )
-            return selected.probe, selected.hyperparameters
-        raise ValueError(f"Unsupported probe method: {method}")
+        else:
+            raise ValueError(f"Unsupported probe method: {method}")
+        tables["tuning_trials"].extend(
+            {
+                "model": model.name,
+                "dataset": data.name,
+                "layer": model.layer,
+                "method": method,
+                "task": "real",
+                "seed": self.config.seed,
+                **trial,
+                "hyperparameters": json.dumps(
+                    trial["hyperparameters"], sort_keys=True
+                ),
+            }
+            for trial in selected.tuning_trials
+        )
+        return selected.hyperparameters
 
     def _run_probe(
         self,
@@ -263,9 +355,21 @@ class FixedLayerSelectivityExperiment:
         run_seed: int,
         run_dir: Path,
         tables: dict[str, list[dict[str, Any]]],
+        hyperparameters: Mapping[str, Any],
     ) -> None:
-        real_probe, hyperparameters = self._select_real_probe(
-            method, activations, real_labels, seed=run_seed
+        real_probe = fit_selected_real_probe(
+            method,
+            activations["train"],
+            real_labels["train"],
+            activations["validation"],
+            real_labels["validation"],
+            hyperparameters=hyperparameters,
+            seed=run_seed,
+            show_progress=self.config.progress.enabled,
+            progress_description=(
+                f"{model.name} {data.name} {method} real seed {run_seed}"
+            ),
+            progress_leave=self.config.progress.leave_completed,
         )
         random_probe = fit_selected_control_probe(
             method,
@@ -280,6 +384,11 @@ class FixedLayerSelectivityExperiment:
                 if method == "mlp1"
                 else None
             ),
+            show_progress=self.config.progress.enabled,
+            progress_description=(
+                f"{model.name} {data.name} {method} random seed {run_seed}"
+            ),
+            progress_leave=self.config.progress.leave_completed,
         )
         for task, probe, labels in (
             ("real", real_probe, real_labels),
@@ -385,6 +494,21 @@ class FixedLayerSelectivityExperiment:
                 "diagnostics": json.dumps(probe.diagnostics, sort_keys=True),
             }
         )
+        state = probe.state()
+        selected_epoch = probe.diagnostics.get("best_epoch")
+        tables["training_history"].extend(
+            {
+                "model": model.name,
+                "dataset": data.name,
+                "layer": model.layer,
+                "method": method,
+                "task": task,
+                "seed": run_seed,
+                **row,
+                "selected_epoch": int(row["epoch"]) == selected_epoch,
+            }
+            for row in state.get("history", ())
+        )
 
     @staticmethod
     def _save_probe(
@@ -401,6 +525,72 @@ class FixedLayerSelectivityExperiment:
         directory.mkdir(parents=True, exist_ok=True)
         torch.save(probe.state(), directory / f"{task}-seed{seed}.pt")
 
+    def _tune_das(
+        self,
+        *,
+        model: FixedLayerModelConfig,
+        adapter: CausalLMAdapter,
+        data: PreparedSelectivityData,
+        tables: dict[str, list[dict[str, Any]]],
+    ) -> DASSelectivityConfig:
+        assert model.layer is not None
+        candidates = self.config.das.candidates()
+        fitted_candidates = [
+            fit_final_token_das(
+                adapter,
+                data.pairs["train"],
+                data.pairs["validation"],
+                layer=model.layer,
+                answers=data.answers,
+                config=candidate,
+                seed=self.config.seed,
+                evaluation_batch_size=model.batch_size,
+                show_progress=self.config.progress.enabled,
+                progress_description=(
+                    f"{model.name} {data.name} DAS tune trial {index + 1}"
+                ),
+                progress_leave=self.config.progress.leave_completed,
+            )
+            for index, candidate in enumerate(candidates)
+        ]
+        selected_index = max(
+            range(len(fitted_candidates)),
+            key=lambda index: (
+                fitted_candidates[index].validation.iia,
+                _finite_or_negative_infinity(
+                    fitted_candidates[index].validation.recovery
+                ),
+                -candidates[index].epochs,
+            ),
+        )
+        tables["tuning_trials"].extend(
+            {
+                "model": model.name,
+                "dataset": data.name,
+                "layer": model.layer,
+                "method": "das",
+                "task": "real",
+                "seed": self.config.seed,
+                "trial_index": index,
+                "hyperparameters": json.dumps(asdict(candidate), sort_keys=True),
+                "validation_native_accuracy": fitted.validation.iia,
+                "validation_native_balanced_accuracy": (
+                    _causal_balanced_accuracy(fitted.validation)
+                ),
+                "validation_midpoint_accuracy": None,
+                "validation_midpoint_balanced_accuracy": None,
+                "validation_loss": 1.0 - fitted.validation.iia,
+                "validation_recovery": _float(fitted.validation.recovery),
+                "validation_logit_flip": _float(fitted.validation.flip_rate),
+                "validation_sign_flip": fitted.validation.sign_flip_rate,
+                "selected": index == selected_index,
+            }
+            for index, (candidate, fitted) in enumerate(
+                zip(candidates, fitted_candidates)
+            )
+        )
+        return candidates[selected_index]
+
     def _run_das(
         self,
         *,
@@ -414,6 +604,7 @@ class FixedLayerSelectivityExperiment:
         run_seed: int,
         run_dir: Path,
         tables: dict[str, list[dict[str, Any]]],
+        selected_config: DASSelectivityConfig,
     ) -> None:
         assert model.layer is not None
         real_fitted = fit_final_token_das(
@@ -422,9 +613,14 @@ class FixedLayerSelectivityExperiment:
             data.pairs["validation"],
             layer=model.layer,
             answers=data.answers,
-            config=self.config.das,
+            config=selected_config,
             seed=run_seed,
             evaluation_batch_size=model.batch_size,
+            show_progress=self.config.progress.enabled,
+            progress_description=(
+                f"{model.name} {data.name} DAS real seed {run_seed}"
+            ),
+            progress_leave=self.config.progress.leave_completed,
         )
         paired_epochs = int(real_fitted.fit_result.diagnostics["selected_epoch"]) + 1
         random_fitted = fit_final_token_das(
@@ -433,10 +629,15 @@ class FixedLayerSelectivityExperiment:
             randomized.pairs["validation"],
             layer=model.layer,
             answers=data.answers,
-            config=self.config.das,
+            config=selected_config,
             seed=run_seed,
             evaluation_batch_size=model.batch_size,
             fixed_epochs=paired_epochs,
+            show_progress=self.config.progress.enabled,
+            progress_description=(
+                f"{model.name} {data.name} DAS random seed {run_seed}"
+            ),
+            progress_leave=self.config.progress.leave_completed,
         )
         for task, pairs, labels, fitted in (
             ("real", data.pairs, real_labels, real_fitted),
@@ -459,6 +660,11 @@ class FixedLayerSelectivityExperiment:
                     answers=data.answers,
                     position="final",
                     batch_size=model.batch_size,
+                    show_progress=self.config.progress.enabled,
+                    progress_description=(
+                        f"{model.name} {data.name} DAS {task} {role} seed {run_seed}"
+                    ),
+                    progress_leave=self.config.progress.leave_completed,
                 )
                 causal = evaluator.evaluate(direction)
                 tables["metrics"].append(
@@ -533,11 +739,23 @@ class FixedLayerSelectivityExperiment:
                     "method": "das",
                     "task": task,
                     "seed": run_seed,
-                    "hyperparameters": json.dumps(asdict(self.config.das), sort_keys=True),
+                    "hyperparameters": json.dumps(asdict(selected_config), sort_keys=True),
                     "diagnostics": json.dumps(
                         fitted.fit_result.diagnostics, sort_keys=True
                     ),
                 }
+            )
+            tables["training_history"].extend(
+                {
+                    "model": model.name,
+                    "dataset": data.name,
+                    "layer": model.layer,
+                    "method": "das",
+                    "task": task,
+                    "seed": run_seed,
+                    **row,
+                }
+                for row in fitted.fit_result.diagnostics.get("loss_history", [])
             )
 
     @staticmethod

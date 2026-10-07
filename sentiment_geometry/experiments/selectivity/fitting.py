@@ -29,6 +29,7 @@ class SelectedProbe:
     probe: BinaryProbe
     hyperparameters: dict[str, Any]
     validation_native_balanced_accuracy: float
+    tuning_trials: tuple[dict[str, Any], ...] = ()
 
 
 def select_logistic_probe(
@@ -41,7 +42,8 @@ def select_logistic_probe(
     seed: int,
 ) -> SelectedProbe:
     candidates: list[SelectedProbe] = []
-    for candidate in search.candidates():
+    trial_rows: list[dict[str, Any]] = []
+    for trial_index, candidate in enumerate(search.candidates()):
         probe = fit_logistic_probe(train_x, train_y, config=candidate, seed=seed)
         evaluation = evaluate_binary_probe(
             training_midpoint_scores=probe.midpoint_scores(train_x),
@@ -51,14 +53,36 @@ def select_logistic_probe(
             labels=validation_y,
             native_threshold=probe.native_threshold,
         )
+        hyperparameters = asdict(candidate)
         candidates.append(
-            SelectedProbe(probe, asdict(candidate), evaluation.native_balanced_accuracy)
+            SelectedProbe(probe, hyperparameters, evaluation.native_balanced_accuracy)
         )
-    return max(
+        trial_rows.append(
+            {
+                "trial_index": trial_index,
+                "hyperparameters": hyperparameters,
+                "validation_native_accuracy": evaluation.native_accuracy,
+                "validation_native_balanced_accuracy": evaluation.native_balanced_accuracy,
+                "validation_midpoint_accuracy": evaluation.midpoint_accuracy,
+                "validation_midpoint_balanced_accuracy": (
+                    evaluation.midpoint_balanced_accuracy
+                ),
+                "validation_loss": None,
+            }
+        )
+    selected = max(
         candidates,
         key=lambda row: (
             row.validation_native_balanced_accuracy,
             -float(row.hyperparameters["c"]),
+        ),
+    )
+    selected_index = candidates.index(selected)
+    return replace(
+        selected,
+        tuning_trials=tuple(
+            {**row, "selected": index == selected_index}
+            for index, row in enumerate(trial_rows)
         ),
     )
 
@@ -71,9 +95,13 @@ def select_mlp1_probe(
     *,
     search: MLP1SearchConfig,
     seed: int,
+    show_progress: bool = False,
+    progress_description: str | None = None,
+    progress_leave: bool = False,
 ) -> SelectedProbe:
     candidates: list[SelectedProbe] = []
-    for candidate in search.candidates():
+    trial_rows: list[dict[str, Any]] = []
+    for trial_index, candidate in enumerate(search.candidates()):
         probe = fit_mlp1_probe(
             train_x,
             train_y,
@@ -81,6 +109,11 @@ def select_mlp1_probe(
             validation_y,
             config=candidate,
             seed=seed,
+            show_progress=show_progress,
+            progress_description=(
+                f"{progress_description or 'Tune MLP-1'} trial {trial_index + 1}"
+            ),
+            progress_leave=progress_leave,
         )
         evaluation = evaluate_binary_probe(
             training_midpoint_scores=probe.midpoint_scores(train_x),
@@ -90,15 +123,39 @@ def select_mlp1_probe(
             labels=validation_y,
             native_threshold=probe.native_threshold,
         )
+        hyperparameters = asdict(candidate)
         candidates.append(
-            SelectedProbe(probe, asdict(candidate), evaluation.native_balanced_accuracy)
+            SelectedProbe(probe, hyperparameters, evaluation.native_balanced_accuracy)
         )
-    return max(
+        trial_rows.append(
+            {
+                "trial_index": trial_index,
+                "hyperparameters": hyperparameters,
+                "validation_native_accuracy": evaluation.native_accuracy,
+                "validation_native_balanced_accuracy": evaluation.native_balanced_accuracy,
+                "validation_midpoint_accuracy": evaluation.midpoint_accuracy,
+                "validation_midpoint_balanced_accuracy": (
+                    evaluation.midpoint_balanced_accuracy
+                ),
+                "validation_loss": float(
+                    probe.diagnostics["best_validation_loss"]
+                ),
+            }
+        )
+    selected = max(
         candidates,
         key=lambda row: (
             row.validation_native_balanced_accuracy,
             -int(row.hyperparameters["hidden_size"]),
             -float(row.hyperparameters["weight_decay"]),
+        ),
+    )
+    selected_index = candidates.index(selected)
+    return replace(
+        selected,
+        tuning_trials=tuple(
+            {**row, "selected": index == selected_index}
+            for index, row in enumerate(trial_rows)
         ),
     )
 
@@ -113,6 +170,9 @@ def fit_selected_control_probe(
     hyperparameters: Mapping[str, Any],
     seed: int,
     training_epochs: int | None = None,
+    show_progress: bool = False,
+    progress_description: str | None = None,
+    progress_leave: bool = False,
 ) -> BinaryProbe:
     if method == "mean_diff":
         return fit_mean_difference_probe(train_x, train_y)
@@ -140,6 +200,48 @@ def fit_selected_control_probe(
             config=config,
             seed=seed,
             select_final_checkpoint=True,
+            show_progress=show_progress,
+            progress_description=progress_description,
+            progress_leave=progress_leave,
+        )
+    raise ValueError(f"Unsupported non-causal probe method: {method}")
+
+
+def fit_selected_real_probe(
+    method: str,
+    train_x: np.ndarray,
+    train_y: np.ndarray,
+    validation_x: np.ndarray,
+    validation_y: np.ndarray,
+    *,
+    hyperparameters: Mapping[str, Any],
+    seed: int,
+    show_progress: bool = False,
+    progress_description: str | None = None,
+    progress_leave: bool = False,
+) -> BinaryProbe:
+    """Fit one real-task probe after validation tuning has been frozen."""
+
+    if method == "mean_diff":
+        return fit_mean_difference_probe(train_x, train_y)
+    if method == "logistic_regression":
+        return fit_logistic_probe(
+            train_x,
+            train_y,
+            config=LogisticProbeConfig(**dict(hyperparameters)),
+            seed=seed,
+        )
+    if method == "mlp1":
+        return fit_mlp1_probe(
+            train_x,
+            train_y,
+            validation_x,
+            validation_y,
+            config=MLP1ProbeConfig(**dict(hyperparameters)),
+            seed=seed,
+            show_progress=show_progress,
+            progress_description=progress_description,
+            progress_leave=progress_leave,
         )
     raise ValueError(f"Unsupported non-causal probe method: {method}")
 
@@ -161,6 +263,9 @@ def fit_final_token_das(
     seed: int,
     evaluation_batch_size: int,
     fixed_epochs: int | None = None,
+    show_progress: bool = False,
+    progress_description: str | None = None,
+    progress_leave: bool = False,
 ) -> FittedDAS:
     validation_evaluator = DirectionalPatchingEvaluator(
         adapter,
@@ -169,10 +274,13 @@ def fit_final_token_das(
         answers=answers,
         position="final",
         batch_size=evaluation_batch_size,
+        show_progress=show_progress,
+        progress_description=f"{progress_description or 'DAS'} validation",
+        progress_leave=progress_leave,
     )
 
     def validate_epoch(direction: np.ndarray) -> dict[str, float]:
-        result = validation_evaluator.evaluate(direction)
+        result = validation_evaluator.evaluate(direction, show_progress=False)
         return {
             "validation_loss": 1.0 - result.iia,
             "validation_iia": result.iia,
@@ -200,6 +308,9 @@ def fit_final_token_das(
             position="final",
             epoch_validator=validate_epoch,
             checkpoint_metric=config.checkpoint_metric,
+            show_progress=show_progress,
+            progress_description=progress_description,
+            progress_leave=progress_leave,
         )
     else:
         fitted = fitter.fit(
@@ -210,8 +321,19 @@ def fit_final_token_das(
             position="final",
             checkpoint_metric="post_epoch_train_loss",
             select_final_epoch=True,
+            show_progress=show_progress,
+            progress_description=progress_description,
+            progress_leave=progress_leave,
         )
-    return FittedDAS(fitted, validation_evaluator.evaluate(fitted.direction))
+    return FittedDAS(
+        fitted,
+        validation_evaluator.evaluate(
+            fitted.direction,
+            show_progress=show_progress,
+            progress_description=f"{progress_description or 'DAS'} validation",
+            progress_leave=progress_leave,
+        ),
+    )
 
 
 __all__ = [
@@ -219,6 +341,7 @@ __all__ = [
     "SelectedProbe",
     "fit_final_token_das",
     "fit_selected_control_probe",
+    "fit_selected_real_probe",
     "select_logistic_probe",
     "select_mlp1_probe",
 ]

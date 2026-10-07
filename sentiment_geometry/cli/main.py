@@ -381,8 +381,11 @@ def main(argv: list[str] | None = None) -> None:
     selectivity.add_argument(
         "--layer",
         action="append",
-        metavar="MODEL=BOUNDARY",
-        help="required when a selected model has no layer in the config",
+        metavar="MODEL[:DATASET]=BOUNDARY",
+        help=(
+            "override every dataset for a model, or one dataset-specific boundary; "
+            "repeat as needed"
+        ),
     )
     selectivity.add_argument(
         "--method",
@@ -587,21 +590,34 @@ def main(argv: list[str] | None = None) -> None:
             selected = set(args.model)
             config.models = [model for model in config.models if model.name in selected]
         layer_overrides: dict[str, int] = {}
+        dataset_layer_overrides: dict[tuple[str, str], int] = {}
         for value in args.layer or []:
             if "=" not in value:
-                parser.error("--layer must use MODEL=BOUNDARY")
-            name, raw_layer = value.split("=", 1)
+                parser.error("--layer must use MODEL[:DATASET]=BOUNDARY")
+            target, raw_layer = value.split("=", 1)
             try:
-                layer_overrides[name] = int(raw_layer)
+                selected_layer = int(raw_layer)
             except ValueError:
                 parser.error(f"invalid residual boundary in --layer {value!r}")
+            if ":" in target:
+                name, dataset = target.split(":", 1)
+                dataset_layer_overrides[(name, dataset)] = selected_layer
+            else:
+                layer_overrides[target] = selected_layer
         known_models = {model.name for model in config.models}
-        unknown_layers = sorted(set(layer_overrides) - known_models)
+        unknown_layers = sorted(
+            (set(layer_overrides) | {name for name, _ in dataset_layer_overrides})
+            - known_models
+        )
         if unknown_layers:
             parser.error(f"--layer names models not selected by the config: {unknown_layers}")
         for model in config.models:
             if model.name in layer_overrides:
                 model.layer = layer_overrides[model.name]
+                model.layers = {}
+            for (name, dataset), selected_layer in dataset_layer_overrides.items():
+                if name == model.name:
+                    model.layers[dataset] = selected_layer
             if args.device:
                 model.device = args.device
             if args.dtype:

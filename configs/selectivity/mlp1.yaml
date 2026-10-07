@@ -1,8 +1,10 @@
-# A deliberately compact grid. Expand individual lists for a larger sweep.
-hidden_size: [4, 10, 32]
-learning_rate: [0.001]
-weight_decay: [0.0, 0.01, 0.1]
-dropout: [0.0]
+# Explicit manual trials, not a Cartesian grid. Edit only hidden size, learning
+# rate, and weight decay. Dropout and the training policy remain fixed.
+trials:
+  - {hidden_size: 4, learning_rate: 0.001, weight_decay: 0.01}
+  - {hidden_size: 10, learning_rate: 0.001, weight_decay: 0.01}
+  - {hidden_size: 32, learning_rate: 0.001, weight_decay: 0.01}
+dropout: 0.0
 batch_size: 16
 max_epochs: 500
 patience: 20

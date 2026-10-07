@@ -1,6 +1,9 @@
-# Select C on real-label validation balanced accuracy. The selected setting is
-# then reused unchanged for the paired random-label probe.
-c: [0.001, 0.01, 0.1, 1.0, 10.0]
+# Explicit manual trials, not a Cartesian grid. Edit at most C, penalty, and
+# class_weight. The winner is selected on real validation balanced accuracy.
+trials:
+  - {c: 0.1, penalty: l2, class_weight: null}
+  - {c: 1.0, penalty: l2, class_weight: null}
+  - {c: 10.0, penalty: l2, class_weight: null}
 solver: liblinear
 max_iter: 5000
 tol: 0.0001

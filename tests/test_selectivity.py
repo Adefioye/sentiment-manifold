@@ -1,8 +1,6 @@
 from pathlib import Path
 
 import numpy as np
-import pytest
-
 from sentiment_geometry.experiments.selectivity import FixedLayerSelectivityConfig
 from sentiment_geometry.experiments.selectivity.datasets import randomize_data
 from sentiment_geometry.experiments.selectivity.datasets import PreparedSelectivityData
@@ -144,18 +142,28 @@ def test_randomize_data_assigns_every_split_and_keeps_ids():
         assert len(randomized.pairs[role]) == 6
 
 
-def test_selectivity_config_loads_modular_hyperparameters_and_requires_layers():
+def test_selectivity_config_loads_fixed_dataset_layers_and_manual_trials():
     config = FixedLayerSelectivityConfig.load(
         PROJECT_ROOT / "configs/selectivity/fixed_layer.yaml"
     )
 
     assert config.methods == ["mean_diff", "logistic_regression", "das", "mlp1"]
     assert config.random_labels.seeds == [11, 22, 33, 44, 55]
-    assert len(config.logistic_regression.candidates()) == 5
-    assert len(config.mlp1.candidates()) == 9
+    assert len(config.logistic_regression.candidates()) == 3
+    assert len(config.das.candidates()) == 3
+    assert len(config.mlp1.candidates()) == 3
     assert config.das.objective == "answer_cross_entropy"
     assert config.das.intervention_position == "final"
+    assert config.progress.enabled is True
     assert config.data.toy_config == str(PROJECT_ROOT / "data/toy_movie_review.yaml")
-
-    with pytest.raises(ValueError, match="explicit residual boundary"):
-        config.validate(require_layers=True)
+    layers = {
+        model.name: {
+            dataset: model.layer_for(dataset) for dataset in config.data.datasets
+        }
+        for model in config.models
+    }
+    assert layers == {
+        "gpt2-small": {"toy_movie_review": 10, "full_ait": 11},
+        "qwen-0.6b": {"toy_movie_review": 26, "full_ait": 26},
+    }
+    config.validate(require_layers=True)

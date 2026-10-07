@@ -7,6 +7,7 @@ from typing import Literal
 
 import numpy as np
 import torch
+from tqdm.auto import tqdm
 
 from ..datasets.types import TextExample
 from ..models import CausalLMAdapter
@@ -21,6 +22,9 @@ def extract_activations(
     *,
     position: ActivationPosition = "focus",
     batch_size: int = 16,
+    show_progress: bool = False,
+    progress_description: str | None = None,
+    progress_leave: bool = False,
 ) -> np.ndarray:
     """Extract one residual-boundary activation per text example."""
 
@@ -30,7 +34,16 @@ def extract_activations(
         raise ValueError("batch_size must be positive")
 
     chunks: list[np.ndarray] = []
-    for start in range(0, len(examples), batch_size):
+    starts = range(0, len(examples), batch_size)
+    batches = tqdm(
+        starts,
+        total=len(starts),
+        desc=progress_description or "Extract activations",
+        leave=progress_leave,
+        disable=not show_progress,
+        unit="batch",
+    )
+    for start in batches:
         selected = examples[start : start + batch_size]
         batch = adapter.tokenize(selected).to(adapter.device_spec.device)
         with torch.inference_mode():
@@ -48,6 +61,9 @@ def extract_mean_pooled_activations(
     *,
     batch_size: int = 16,
     include_special_tokens: bool = False,
+    show_progress: bool = False,
+    progress_description: str | None = None,
+    progress_leave: bool = False,
 ) -> np.ndarray:
     """Mean-pool one residual-boundary representation over each prompt's real tokens."""
 
@@ -57,7 +73,16 @@ def extract_mean_pooled_activations(
         raise ValueError("batch_size must be positive")
 
     chunks: list[np.ndarray] = []
-    for start in range(0, len(examples), batch_size):
+    starts = range(0, len(examples), batch_size)
+    batches = tqdm(
+        starts,
+        total=len(starts),
+        desc=progress_description or "Extract mean-pooled activations",
+        leave=progress_leave,
+        disable=not show_progress,
+        unit="batch",
+    )
+    for start in batches:
         selected = examples[start : start + batch_size]
         batch = adapter.tokenize(selected).to(adapter.device_spec.device)
         with torch.inference_mode():
@@ -81,6 +106,9 @@ def extract_last_token_activations(
     layer: int,
     *,
     batch_size: int = 16,
+    show_progress: bool = False,
+    progress_description: str | None = None,
+    progress_leave: bool = False,
 ) -> np.ndarray:
     """Extract each prompt's final non-padding residual-stream activation."""
 
@@ -90,4 +118,7 @@ def extract_last_token_activations(
         layer,
         position="final",
         batch_size=batch_size,
+        show_progress=show_progress,
+        progress_description=progress_description,
+        progress_leave=progress_leave,
     )

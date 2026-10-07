@@ -9,6 +9,7 @@ from .config import (
     RandomLabelConfig,
     SelectivityDataConfig,
     SelectivityOutputConfig,
+    SelectivityProgressConfig,
 )
 from .experiment import FixedLayerSelectivityExperiment, run_fixed_layer_selectivity
 
@@ -22,5 +23,6 @@ __all__ = [
     "RandomLabelConfig",
     "SelectivityDataConfig",
     "SelectivityOutputConfig",
+    "SelectivityProgressConfig",
     "run_fixed_layer_selectivity",
 ]

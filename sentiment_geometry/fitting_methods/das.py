@@ -9,6 +9,7 @@ import numpy as np
 import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
+from tqdm.auto import tqdm
 
 from ..datasets.types import CounterfactualPair
 from ..interventions import directional_replace
@@ -112,6 +113,10 @@ class DASFitter:
         layer: int,
         answer_ids: dict[int, Tensor],
         position: str,
+        *,
+        show_progress: bool = False,
+        progress_description: str | None = None,
+        progress_leave: bool = False,
     ) -> tuple[list[_PreparedBatch], float, float, np.ndarray, np.ndarray]:
         prepared: list[_PreparedBatch] = []
         clean_margins: list[Tensor] = []
@@ -119,7 +124,16 @@ class DASFitter:
         activation_rows: list[Tensor] = []
         activation_labels: list[Tensor] = []
         device = adapter.device_spec.device
-        for start in range(0, len(pairs), self.config.batch_size):
+        starts = range(0, len(pairs), self.config.batch_size)
+        batches = tqdm(
+            starts,
+            total=len(starts),
+            desc=f"{progress_description or 'DAS'} prepare",
+            leave=progress_leave,
+            disable=not show_progress,
+            unit="batch",
+        )
+        for start in batches:
             selected = pairs[start : start + self.config.batch_size]
             corrupted = adapter.tokenize([pair.corrupted for pair in selected]).to(device)
             clean = adapter.tokenize([pair.clean for pair in selected]).to(device)
@@ -249,6 +263,9 @@ class DASFitter:
         epoch_validator: EpochValidator | None = None,
         checkpoint_metric: str = "post_epoch_train_loss",
         select_final_epoch: bool = False,
+        show_progress: bool = False,
+        progress_description: str | None = None,
+        progress_leave: bool = False,
     ) -> FitResult:
         if not pairs:
             raise ValueError("DAS requires at least one counterfactual pair")
@@ -257,7 +274,14 @@ class DASFitter:
         torch.manual_seed(self.config.seed)
         ids = _answer_ids(adapter, answers)
         prepared, clean_baseline, corrupted_baseline, activations, labels = self._prepare(
-            adapter, pairs, layer, ids, position
+            adapter,
+            pairs,
+            layer,
+            ids,
+            position,
+            show_progress=show_progress,
+            progress_description=progress_description,
+            progress_leave=progress_leave,
         )
         rotation = _RotateLayer(adapter.hidden_size, adapter.device_spec.device)
         rotation = torch.nn.utils.parametrizations.orthogonal(
@@ -274,7 +298,14 @@ class DASFitter:
         best_epoch: int | None = None
         best_basis: Tensor | None = None
         adapter.model.eval()
-        for epoch in range(self.config.epochs):
+        epoch_progress = tqdm(
+            range(self.config.epochs),
+            desc=progress_description or "Train DAS",
+            leave=progress_leave,
+            disable=not show_progress,
+            unit="epoch",
+        )
+        for epoch in epoch_progress:
             rotation.train()
             train_total = 0.0
             for batch in prepared:
@@ -328,6 +359,13 @@ class DASFitter:
                 best_metric_value = metric_value
                 best_epoch = epoch
                 best_basis = rotation.weight[:, : self.dimension].detach().clone()
+            epoch_progress.set_postfix(
+                train_loss=f"{post_epoch_train_loss:.4f}",
+                checkpoint=f"{metric_value:.4f}",
+                best_epoch=best_epoch,
+            )
+
+        epoch_progress.close()
 
         if select_final_epoch:
             best_epoch = self.config.epochs - 1

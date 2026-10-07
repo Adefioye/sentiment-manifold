@@ -18,6 +18,15 @@ SUPPORTED_DATASETS = ("toy_movie_review", "full_ait")
 @dataclass
 class FixedLayerModelConfig(ModelConfig):
     layer: int | None = None
+    layers: dict[str, int] = field(default_factory=dict)
+
+    def layer_for(self, dataset: str) -> int:
+        selected = self.layers.get(dataset, self.layer)
+        if selected is None:
+            raise ValueError(
+                f"Set an explicit residual boundary for {self.name}/{dataset}"
+            )
+        return int(selected)
 
 
 @dataclass
@@ -50,7 +59,13 @@ class RandomLabelConfig:
 
 @dataclass
 class LogisticSearchConfig:
-    c: list[float] = field(default_factory=lambda: [0.001, 0.01, 0.1, 1.0, 10.0])
+    trials: list[dict[str, Any]] = field(
+        default_factory=lambda: [
+            {"c": 0.1, "penalty": "l2", "class_weight": None},
+            {"c": 1.0, "penalty": "l2", "class_weight": None},
+            {"c": 10.0, "penalty": "l2", "class_weight": None},
+        ]
+    )
     solver: str = "liblinear"
     max_iter: int = 5000
     tol: float = 1e-4
@@ -59,13 +74,14 @@ class LogisticSearchConfig:
     def candidates(self) -> tuple[LogisticProbeConfig, ...]:
         return tuple(
             LogisticProbeConfig(
-                c=value,
+                c=float(trial.get("c", 1.0)),
+                penalty=str(trial.get("penalty", "l2")),
                 solver=self.solver,
                 max_iter=self.max_iter,
                 tol=self.tol,
-                class_weight=self.class_weight,
+                class_weight=trial.get("class_weight", self.class_weight),
             )
-            for value in self.c
+            for trial in self.trials
         )
 
 
@@ -79,14 +95,36 @@ class DASSelectivityConfig:
     objective: str = "answer_cross_entropy"
     intervention_position: str = "final"
     checkpoint_metric: str = "validation_loss"
+    trials: list[dict[str, Any]] = field(default_factory=list)
+
+    def candidates(self) -> tuple["DASSelectivityConfig", ...]:
+        trials = self.trials or [{}]
+        return tuple(
+            DASSelectivityConfig(
+                epochs=int(trial.get("epochs", self.epochs)),
+                learning_rate=float(trial.get("learning_rate", self.learning_rate)),
+                weight_decay=float(trial.get("weight_decay", self.weight_decay)),
+                batch_size=self.batch_size,
+                max_grad_norm=self.max_grad_norm,
+                objective=self.objective,
+                intervention_position=self.intervention_position,
+                checkpoint_metric=self.checkpoint_metric,
+                trials=[],
+            )
+            for trial in trials
+        )
 
 
 @dataclass
 class MLP1SearchConfig:
-    hidden_size: list[int] = field(default_factory=lambda: [2, 4, 10, 16, 32, 64])
-    learning_rate: list[float] = field(default_factory=lambda: [1e-4, 3e-4, 1e-3])
-    weight_decay: list[float] = field(default_factory=lambda: [0.0, 1e-3, 1e-2, 0.1])
-    dropout: list[float] = field(default_factory=lambda: [0.0, 0.2])
+    trials: list[dict[str, Any]] = field(
+        default_factory=lambda: [
+            {"hidden_size": 4, "learning_rate": 1e-3, "weight_decay": 1e-2},
+            {"hidden_size": 10, "learning_rate": 1e-3, "weight_decay": 1e-2},
+            {"hidden_size": 32, "learning_rate": 1e-3, "weight_decay": 1e-2},
+        ]
+    )
+    dropout: float = 0.0
     batch_size: int = 16
     max_epochs: int = 500
     patience: int = 20
@@ -96,28 +134,32 @@ class MLP1SearchConfig:
     def candidates(self) -> tuple[MLP1ProbeConfig, ...]:
         return tuple(
             MLP1ProbeConfig(
-                hidden_size=hidden,
-                learning_rate=learning_rate,
-                weight_decay=weight_decay,
-                dropout=dropout,
+                hidden_size=int(trial.get("hidden_size", 10)),
+                learning_rate=float(trial.get("learning_rate", 1e-3)),
+                weight_decay=float(trial.get("weight_decay", 1e-2)),
+                dropout=self.dropout,
                 batch_size=self.batch_size,
                 max_epochs=self.max_epochs,
                 patience=self.patience,
                 min_delta=self.min_delta,
                 standardize_inputs=self.standardize_inputs,
             )
-            for hidden in self.hidden_size
-            for learning_rate in self.learning_rate
-            for weight_decay in self.weight_decay
-            for dropout in self.dropout
+            for trial in self.trials
         )
 
 
 @dataclass
 class SelectivityOutputConfig:
     output_dir: str = "outputs/fixed-layer-selectivity"
+    run_id: str | None = None
     cache_activations: bool = True
     save_predictions: bool = True
+
+
+@dataclass
+class SelectivityProgressConfig:
+    enabled: bool = True
+    leave_completed: bool = False
 
 
 @dataclass
@@ -131,6 +173,7 @@ class FixedLayerSelectivityConfig:
     das: DASSelectivityConfig = field(default_factory=DASSelectivityConfig)
     mlp1: MLP1SearchConfig = field(default_factory=MLP1SearchConfig)
     output: SelectivityOutputConfig = field(default_factory=SelectivityOutputConfig)
+    progress: SelectivityProgressConfig = field(default_factory=SelectivityProgressConfig)
     source_path: Path | None = None
 
     @classmethod
@@ -160,6 +203,7 @@ class FixedLayerSelectivityConfig:
             das=DASSelectivityConfig(**section("das")),
             mlp1=MLP1SearchConfig(**section("mlp1")),
             output=SelectivityOutputConfig(**raw.get("output", {})),
+            progress=SelectivityProgressConfig(**raw.get("progress", {})),
             source_path=source,
         )
         project_root = source.parents[2]
@@ -177,14 +221,37 @@ class FixedLayerSelectivityConfig:
             raise ValueError("At least one model must be configured")
         if len({model.name for model in self.models}) != len(self.models):
             raise ValueError("Configured model names must be unique")
-        missing_layers = [model.name for model in self.models if model.layer is None]
+        missing_layers = [
+            f"{model.name}/{dataset}"
+            for model in self.models
+            for dataset in self.data.datasets
+            if dataset not in model.layers and model.layer is None
+        ]
         if require_layers and missing_layers:
             raise ValueError(
                 "Set an explicit residual boundary for each model before running: "
                 f"{missing_layers}"
             )
-        if any(model.layer is not None and model.layer < 1 for model in self.models):
+        configured_layers = [
+            value
+            for model in self.models
+            for value in ([model.layer] if model.layer is not None else [])
+            + list(model.layers.values())
+        ]
+        if any(layer < 1 for layer in configured_layers):
             raise ValueError("Fixed layers must exclude embedding boundary 0")
+        unknown_layer_datasets = sorted(
+            {
+                dataset
+                for model in self.models
+                for dataset in model.layers
+                if dataset not in SUPPORTED_DATASETS
+            }
+        )
+        if unknown_layer_datasets:
+            raise ValueError(
+                f"Unsupported datasets in model layer mappings: {unknown_layer_datasets}"
+            )
         unknown_methods = sorted(set(self.methods) - set(SUPPORTED_METHODS))
         if unknown_methods:
             raise ValueError(f"Unsupported selectivity methods: {unknown_methods}")
@@ -205,10 +272,35 @@ class FixedLayerSelectivityConfig:
             raise ValueError("Fixed-layer selectivity requires final-token DAS")
         if self.das.objective not in {"normalized_logit_difference", "answer_cross_entropy"}:
             raise ValueError("Unsupported DAS objective")
-        if not self.logistic_regression.c:
-            raise ValueError("Logistic-regression C grid must not be empty")
+        if not self.logistic_regression.trials:
+            raise ValueError("Logistic-regression trial list must not be empty")
         if not self.mlp1.candidates():
-            raise ValueError("MLP-1 grid must not be empty")
+            raise ValueError("MLP-1 trial list must not be empty")
+        self._validate_manual_trials()
+
+    def _validate_manual_trials(self) -> None:
+        specifications = (
+            (
+                "logistic_regression",
+                self.logistic_regression.trials,
+                {"c", "penalty", "class_weight"},
+            ),
+            (
+                "das",
+                self.das.trials,
+                {"learning_rate", "weight_decay", "epochs"},
+            ),
+            (
+                "mlp1",
+                self.mlp1.trials,
+                {"hidden_size", "learning_rate", "weight_decay"},
+            ),
+        )
+        for name, trials, allowed in specifications:
+            for trial in trials:
+                unknown = sorted(set(trial) - allowed)
+                if unknown:
+                    raise ValueError(f"Unsupported {name} trial parameters: {unknown}")
 
     def to_dict(self) -> dict[str, Any]:
         result = asdict(self)
@@ -225,6 +317,7 @@ __all__ = [
     "RandomLabelConfig",
     "SelectivityDataConfig",
     "SelectivityOutputConfig",
+    "SelectivityProgressConfig",
     "SUPPORTED_DATASETS",
     "SUPPORTED_METHODS",
 ]

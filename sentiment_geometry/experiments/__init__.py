@@ -14,6 +14,11 @@ from .ait_valence import (
     run_ait_valence_direction_experiment,
 )
 from .reproduction import ReproductionConfig, run_reproduction
+from .selectivity import (
+    FixedLayerSelectivityConfig,
+    FixedLayerSelectivityExperiment,
+    run_fixed_layer_selectivity,
+)
 from .sentiment_position import (
     DirectionArtifactAudit,
     FrozenDirectionEvaluationConfig,
@@ -42,6 +47,8 @@ __all__ = [
     "FrozenDirectionSelection",
     "FrozenEvaluationDataset",
     "FrozenSentimentDirectionEvaluation",
+    "FixedLayerSelectivityConfig",
+    "FixedLayerSelectivityExperiment",
     "PreparedAITData",
     "ReproductionConfig",
     "SentimentPositionExperiment",
@@ -51,6 +58,7 @@ __all__ = [
     "load_frozen_direction_selections",
     "run_ait_valence_direction_experiment",
     "run_frozen_sentiment_direction_evaluation",
+    "run_fixed_layer_selectivity",
     "run_reproduction",
     "run_sentiment_position_comparison",
 ]

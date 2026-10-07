@@ -18,6 +18,7 @@ from .sentiment_position import (
     plot_logit_difference_grid,
     selected_layer_table,
 )
+from .selectivity import plot_fixed_layer_selectivity
 from .table1 import (
     select_table1_best_layers,
     table1_cell_text,
@@ -36,6 +37,7 @@ __all__ = [
     "plot_direction_alignment",
     "plot_pairwise_absolute_direction_alignment",
     "plot_logit_difference_grid",
+    "plot_fixed_layer_selectivity",
     "select_table1_best_layers",
     "selected_layer_table",
     "table1_cell_text",

@@ -22,6 +22,7 @@ class DASConfig:
     batch_size: int = 128
     max_grad_norm: float = 1.0
     implementation: str = "tigges_rotation"
+    objective: str = "normalized_logit_difference"
 
 
 __all__ = ["DASConfig", "FittingConfig"]

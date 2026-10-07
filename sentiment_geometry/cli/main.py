@@ -26,6 +26,10 @@ from ..experiments.ait_valence import (
     run_ait_valence_direction_experiment,
 )
 from ..experiments.reproduction import ReproductionConfig, run_reproduction
+from ..experiments.selectivity import (
+    FixedLayerSelectivityConfig,
+    run_fixed_layer_selectivity,
+)
 from ..experiments.sentiment_position import (
     SentimentPositionExperimentConfig,
     run_sentiment_position_comparison,
@@ -358,8 +362,49 @@ def main(argv: list[str] | None = None) -> None:
     ait_layer_group.add_argument("--all-non-embedding-layers", action="store_true")
     ait_layer_group.add_argument("--layer", action="append", type=int)
 
+    selectivity = subparsers.add_parser(
+        "fixed-layer-selectivity",
+        help=(
+            "compare real and example-level random-label probes at one frozen "
+            "last-token residual boundary per model"
+        ),
+    )
+    selectivity.add_argument(
+        "--config", default="configs/selectivity/fixed_layer.yaml"
+    )
+    selectivity.add_argument(
+        "--model",
+        action="append",
+        choices=("gpt2-small", "qwen-0.6b"),
+        help="model to run; repeat for both",
+    )
+    selectivity.add_argument(
+        "--layer",
+        action="append",
+        metavar="MODEL=BOUNDARY",
+        help="required when a selected model has no layer in the config",
+    )
+    selectivity.add_argument(
+        "--method",
+        action="append",
+        choices=("mean_diff", "logistic_regression", "das", "mlp1"),
+    )
+    selectivity.add_argument(
+        "--device", choices=["auto", "cuda", "mps", "cpu"], default=None
+    )
+    selectivity.add_argument(
+        "--dtype", choices=["auto", "float32", "float16", "bfloat16"], default=None
+    )
+    selectivity.add_argument("--output-dir", default=None)
+
     plot_parser = subparsers.add_parser("plot", help="render plots from a completed run")
     plot_parser.add_argument("--run-dir", required=True)
+
+    selectivity_plot_parser = subparsers.add_parser(
+        "plot-fixed-layer-selectivity",
+        help="render native/midpoint and selectivity plots from saved tables",
+    )
+    selectivity_plot_parser.add_argument("--run-dir", required=True)
 
     tune_parser = subparsers.add_parser(
         "tune",
@@ -536,10 +581,47 @@ def main(argv: list[str] | None = None) -> None:
         )
         run_dir = run_ait_valence_direction_experiment(config)
         print(f"Completed AIT valence-direction experiment: {run_dir}")
+    elif args.command == "fixed-layer-selectivity":
+        config = FixedLayerSelectivityConfig.load(args.config)
+        if args.model:
+            selected = set(args.model)
+            config.models = [model for model in config.models if model.name in selected]
+        layer_overrides: dict[str, int] = {}
+        for value in args.layer or []:
+            if "=" not in value:
+                parser.error("--layer must use MODEL=BOUNDARY")
+            name, raw_layer = value.split("=", 1)
+            try:
+                layer_overrides[name] = int(raw_layer)
+            except ValueError:
+                parser.error(f"invalid residual boundary in --layer {value!r}")
+        known_models = {model.name for model in config.models}
+        unknown_layers = sorted(set(layer_overrides) - known_models)
+        if unknown_layers:
+            parser.error(f"--layer names models not selected by the config: {unknown_layers}")
+        for model in config.models:
+            if model.name in layer_overrides:
+                model.layer = layer_overrides[model.name]
+            if args.device:
+                model.device = args.device
+            if args.dtype:
+                model.dtype = args.dtype
+        if args.method:
+            config.methods = list(dict.fromkeys(args.method))
+        if args.output_dir:
+            config.output.output_dir = str(Path(args.output_dir).resolve())
+        config.validate(require_layers=True)
+        run_dir = run_fixed_layer_selectivity(config)
+        print(f"Completed fixed-layer selectivity experiment: {run_dir}")
     elif args.command == "plot":
         from ..reporting.plots import plot_run
 
         for path in plot_run(args.run_dir):
+            print(path)
+    elif args.command == "plot-fixed-layer-selectivity":
+        from ..reporting import plot_fixed_layer_selectivity
+
+        for path in plot_fixed_layer_selectivity(args.run_dir):
             print(path)
     elif args.command == "tune":
         run_dir = run_tuning(_load_with_overrides(args), args.method)

@@ -1,0 +1,10 @@
+# A deliberately compact grid. Expand individual lists for a larger sweep.
+hidden_size: [4, 10, 32]
+learning_rate: [0.001]
+weight_decay: [0.0, 0.01, 0.1]
+dropout: [0.0]
+batch_size: 16
+max_epochs: 500
+patience: 20
+min_delta: 0.0001
+standardize_inputs: true

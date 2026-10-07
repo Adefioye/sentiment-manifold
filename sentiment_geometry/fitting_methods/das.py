@@ -8,6 +8,7 @@ from dataclasses import dataclass
 import numpy as np
 import torch
 from torch import Tensor, nn
+from torch.nn import functional as F
 
 from ..datasets.types import CounterfactualPair
 from ..interventions import directional_replace
@@ -26,6 +27,14 @@ class DASTrainingConfig:
     batch_size: int = 16
     max_grad_norm: float = 1.0
     seed: int = 0
+    objective: str = "normalized_logit_difference"
+
+    def __post_init__(self) -> None:
+        if self.objective not in {"normalized_logit_difference", "answer_cross_entropy"}:
+            raise ValueError(
+                "DAS objective must be 'normalized_logit_difference' or "
+                "'answer_cross_entropy'"
+            )
 
 
 class _RotateLayer(nn.Module):
@@ -114,7 +123,9 @@ class DASFitter:
             selected = pairs[start : start + self.config.batch_size]
             corrupted = adapter.tokenize([pair.corrupted for pair in selected]).to(device)
             clean = adapter.tokenize([pair.clean for pair in selected]).to(device)
-            if not torch.equal(clean.attention_mask.sum(1), corrupted.attention_mask.sum(1)):
+            if position == "all" and not torch.equal(
+                clean.attention_mask.sum(1), corrupted.attention_mask.sum(1)
+            ):
                 raise ValueError("DAS clean/corrupted prompts must have equal token lengths")
             labels = torch.tensor([pair.clean.label for pair in selected], device=device)
             rows = torch.arange(len(selected), device=device)
@@ -211,6 +222,15 @@ class DASFitter:
         rows = torch.arange(len(batch.target_labels), device=output.logits.device)
         positions = adapter.last_positions(corrupted.attention_mask)
         logits = output.logits[rows, positions].float()
+        if self.config.objective == "answer_cross_entropy":
+            class_logits = torch.stack(
+                (
+                    logits.index_select(-1, answer_ids[0]).mean(dim=-1),
+                    logits.index_select(-1, answer_ids[1]).mean(dim=-1),
+                ),
+                dim=-1,
+            )
+            return F.cross_entropy(class_logits, batch.target_labels)
         patched = target_signed_margins(logits, batch.target_labels, answer_ids).mean()
         denominator = corrupted_baseline - clean_baseline
         if abs(denominator) < 1e-8:
@@ -228,6 +248,7 @@ class DASFitter:
         position: str = "focus",
         epoch_validator: EpochValidator | None = None,
         checkpoint_metric: str = "post_epoch_train_loss",
+        select_final_epoch: bool = False,
     ) -> FitResult:
         if not pairs:
             raise ValueError("DAS requires at least one counterfactual pair")
@@ -308,6 +329,11 @@ class DASFitter:
                 best_epoch = epoch
                 best_basis = rotation.weight[:, : self.dimension].detach().clone()
 
+        if select_final_epoch:
+            best_epoch = self.config.epochs - 1
+            best_metric_value = float(history[-1][checkpoint_metric])
+            best_basis = rotation.weight[:, : self.dimension].detach().clone()
+
         if best_basis is None or best_epoch is None:
             raise RuntimeError(
                 f"DAS checkpoint metric {checkpoint_metric!r} was non-finite for every epoch"
@@ -325,6 +351,7 @@ class DASFitter:
             output_direction,
             {
                 "implementation": "tigges_rotation",
+                "objective": self.config.objective,
                 "subspace_dimension": self.dimension,
                 "epochs": self.config.epochs,
                 "clean_baseline_margin": clean_baseline,
@@ -333,6 +360,7 @@ class DASFitter:
                 "checkpoint_selection_metric": checkpoint_metric,
                 "best_checkpoint_metric": best_metric_value,
                 "selected_epoch": best_epoch,
+                "selected_final_epoch": select_final_epoch,
                 "loss_history": history,
                 "orientation_convention": "negative_to_positive_first_basis_vector",
                 "orientation_reference": "toy_train_class_mean_difference",

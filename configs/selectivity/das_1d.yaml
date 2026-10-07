@@ -1,0 +1,11 @@
+epochs: 64
+learning_rate: 0.001
+weight_decay: 0.0
+batch_size: 16
+max_grad_norm: 1.0
+
+# Cross-entropy is used for both real and random tasks because random labels do
+# not provide a trustworthy clean/corrupted recovery denominator.
+objective: answer_cross_entropy
+intervention_position: final
+checkpoint_metric: validation_loss

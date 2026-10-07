@@ -27,6 +27,7 @@ class PatchingResult:
     patched_accuracy: float
     n_pairs: int
     records: tuple[dict, ...]
+    iia: float = float("nan")
 
     @property
     def recovery_percent(self) -> float:
@@ -277,6 +278,9 @@ class DirectionalPatchingEvaluator:
                 .cpu()
             )
             flips.append(batch_flips)
+            batch_iia = (
+                _target_signed_margins(patched_differences, targets) > 0
+            ).float().cpu()
             for index, pair in enumerate(batch.pairs):
                 corrupted_value = float(corrupted_batch_margins[index])
                 clean_value = float(clean_batch_margins[index])
@@ -301,6 +305,7 @@ class DirectionalPatchingEvaluator:
                         if abs(denominator) < 1e-8
                         else 100.0 * (patched_value - corrupted_value) / denominator,
                         "flipped": float(batch_flips[index]),
+                        "iia_correct": float(batch_iia[index]),
                     }
                 )
 
@@ -353,6 +358,10 @@ def _summarize_patching(
     corrupted_accuracy = (centered_corrupted_margins > 0).float().mean().item()
     clean_accuracy = (centered_clean_margins > 0).float().mean().item()
     patched_accuracy = (centered_patched_margins > 0).float().mean().item()
+    raw_patched_margins = _target_signed_margins(
+        torch.cat(patched_logit_differences), targets
+    )
+    iia = (raw_patched_margins > 0).float().mean().item()
     accuracy_denominator = clean_accuracy - corrupted_accuracy
     flip_rate = (
         float("nan")
@@ -371,6 +380,7 @@ def _summarize_patching(
         patched_accuracy=float(patched_accuracy),
         n_pairs=n_pairs,
         records=tuple(records),
+        iia=float(iia),
     )
 
 

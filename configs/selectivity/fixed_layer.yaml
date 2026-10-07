@@ -1,0 +1,55 @@
+seed: 0
+
+# Set these boundaries before a reportable run, or pass
+# --layer gpt2-small=N --layer qwen-0.6b=M on the command line.
+models:
+  - name: gpt2-small
+    layer: null
+    revision: 607a30d783dfa663caf39e06633721c8d4cfcd7e
+    prepend_bos: true
+    device: auto
+    dtype: auto
+    batch_size: 16
+  - name: qwen-0.6b
+    layer: null
+    revision: da87bfb608c14b7cf20ba1ce41287e8de496c0cd
+    prepend_bos: false
+    device: auto
+    dtype: auto
+    batch_size: 8
+
+methods: [mean_diff, logistic_regression, das, mlp1]
+
+data:
+  datasets: [toy_movie_review, full_ait]
+  toy_config: data/toy_movie_review.yaml
+  toy_validation_fraction: 0.2
+  ait_repo_id: kokolamba/sentiment-manifold-ait-valence-binary
+  ait_revision: c53df7c117c2f433df904cfaeddb9062027f755f
+  ait_model_matched_configs:
+    gpt2-small: gpt2_small_matched_pairs
+    qwen-0.6b: qwen_0_6b_matched_pairs
+  ait_train_split: train
+  ait_validation_split: validation
+  ait_test_split: test
+  hf_token_env: HF_TOKEN
+  positive_answers: [" Positive"]
+  negative_answers: [" Negative"]
+
+# Each seed is a paired run: the real task uses the seed for optimization,
+# while the control uses the same optimization seed plus a new balanced label
+# permutation. This is example-level random labeling only.
+random_labels:
+  seeds: [11, 22, 33, 44, 55]
+  preserve_class_counts: true
+  generate_per_split: true
+
+hyperparameter_files:
+  logistic_regression: logistic_regression.yaml
+  das: das_1d.yaml
+  mlp1: mlp1.yaml
+
+output:
+  output_dir: outputs/fixed-layer-selectivity
+  cache_activations: true
+  save_predictions: true

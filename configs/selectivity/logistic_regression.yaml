@@ -1,0 +1,7 @@
+# Select C on real-label validation balanced accuracy. The selected setting is
+# then reused unchanged for the paired random-label probe.
+c: [0.001, 0.01, 0.1, 1.0, 10.0]
+solver: liblinear
+max_iter: 5000
+tol: 0.0001
+class_weight: null

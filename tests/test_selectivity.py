@@ -163,7 +163,7 @@ def test_selectivity_config_loads_fixed_dataset_layers_and_manual_trials():
     assert config.methods == ["mean_diff", "logistic_regression", "das", "mlp1"]
     assert config.random_labels.seeds == [11, 22, 33, 44, 55]
     assert len(config.logistic_regression.candidates()) == 3
-    assert len(config.das.candidates()) == 3
+    assert len(config.das.candidates()) == 10
     assert len(config.mlp1.candidates()) == 3
     assert config.das.objective == "answer_cross_entropy"
     assert config.das.intervention_position == "final"

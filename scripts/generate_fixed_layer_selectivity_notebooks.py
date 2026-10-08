@@ -47,15 +47,31 @@ METHODS = {
         "title": "One-dimensional DAS random-label selectivity",
         "filename": "colab_fixed_layer_das_selectivity",
         "description": (
-            "Three explicit DAS trials vary learning rate, weight decay, and epoch budget. "
-            "Validation IIA is primary; recovery is only a tie-breaker."
+            "Ten explicit DAS trials vary only learning rate across two orders of magnitude. "
+            "Weight decay and the epoch budget stay fixed, while validation IIA remains the "
+            "primary selection metric."
+        ),
+        "tuning_note": (
+            "**Epoch-budget note.** The initial sweep holds every trial at 64 epochs so learning "
+            "rate is the only changing factor. After tuning, inspect `best_epoch` and "
+            "`best_epoch_near_budget`. If strong candidates select checkpoints near the 64-epoch "
+            "limit, start a new `RUN_ID` and increase the epoch budget for every learning-rate "
+            "trial equally (for example, to 96 or 128). Never decide this from test metrics or "
+            "increase the budget for only the winning learning rate."
         ),
         "settings": dedent(
             """
             MANUAL_TRIALS = [
+                {"learning_rate": 0.0001, "weight_decay": 0.0, "epochs": 64},
+                {"learning_rate": 0.0002, "weight_decay": 0.0, "epochs": 64},
                 {"learning_rate": 0.0003, "weight_decay": 0.0, "epochs": 64},
+                {"learning_rate": 0.0005, "weight_decay": 0.0, "epochs": 64},
+                {"learning_rate": 0.0007, "weight_decay": 0.0, "epochs": 64},
                 {"learning_rate": 0.001, "weight_decay": 0.0, "epochs": 64},
-                {"learning_rate": 0.001, "weight_decay": 0.001, "epochs": 96},
+                {"learning_rate": 0.002, "weight_decay": 0.0, "epochs": 64},
+                {"learning_rate": 0.003, "weight_decay": 0.0, "epochs": 64},
+                {"learning_rate": 0.005, "weight_decay": 0.0, "epochs": 64},
+                {"learning_rate": 0.01, "weight_decay": 0.0, "epochs": 64},
             ]
             """
         ).strip(),
@@ -108,6 +124,7 @@ def code(source: str) -> dict:
 def notebook(method: str, details: dict) -> dict:
     title = details["title"]
     description = details["description"]
+    tuning_note = details.get("tuning_note", "")
     settings = details["settings"]
     override = details["override"]
     selection_example = {
@@ -427,6 +444,7 @@ def notebook(method: str, details: dict) -> dict:
                             "validation_midpoint_balanced_accuracy",
                             "validation_loss", "validation_recovery",
                             "validation_logit_flip", "validation_sign_flip", "selected",
+                            "best_epoch", "epoch_budget", "best_epoch_near_budget",
                         ],
                     )
                     tuning_figure = plot_fixed_layer_hyperparameter_tuning(run_dir)
@@ -525,12 +543,14 @@ def notebook(method: str, details: dict) -> dict:
             """
         ),
         markdown(
-            """
+            f"""
             ## 5. GPT-2 Small
 
             ### 5a. Tune on real validation data and visualize every trial
 
             This stage does not train either final real-label or random-label model.
+
+            {tuning_note}
             """
         ),
         code(
@@ -569,12 +589,14 @@ def notebook(method: str, details: dict) -> dict:
             """
         ),
         markdown(
-            """
+            f"""
             ## 6. Qwen3-0.6B Base
 
             ### 6a. Tune on real validation data and visualize every trial
 
             This repeats the complete selection process independently for Qwen and both datasets.
+
+            {tuning_note}
             """
         ),
         code(

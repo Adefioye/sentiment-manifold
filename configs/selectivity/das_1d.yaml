@@ -10,8 +10,17 @@ objective: answer_cross_entropy
 intervention_position: final
 checkpoint_metric: validation_loss
 
-# Explicit manual trials over only learning rate, weight decay, and epochs.
+# Explicit one-parameter sweep: learning rate varies while every other DAS
+# training choice remains fixed. Values are approximately log-spaced and keep
+# the reference 0.001 setting.
 trials:
+  - {learning_rate: 0.0001, weight_decay: 0.0, epochs: 64}
+  - {learning_rate: 0.0002, weight_decay: 0.0, epochs: 64}
   - {learning_rate: 0.0003, weight_decay: 0.0, epochs: 64}
+  - {learning_rate: 0.0005, weight_decay: 0.0, epochs: 64}
+  - {learning_rate: 0.0007, weight_decay: 0.0, epochs: 64}
   - {learning_rate: 0.001, weight_decay: 0.0, epochs: 64}
-  - {learning_rate: 0.001, weight_decay: 0.001, epochs: 96}
+  - {learning_rate: 0.002, weight_decay: 0.0, epochs: 64}
+  - {learning_rate: 0.003, weight_decay: 0.0, epochs: 64}
+  - {learning_rate: 0.005, weight_decay: 0.0, epochs: 64}
+  - {learning_rate: 0.01, weight_decay: 0.0, epochs: 64}

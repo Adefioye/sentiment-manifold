@@ -112,6 +112,7 @@ def plot_fixed_layer_hyperparameter_tuning(run_dir: str | Path) -> Path:
     ).dropna(subset=["validation_score"])
     plotted["metric"] = plotted["metric"].map(metric_columns)
     sns.set_theme(style="whitegrid")
+    trial_count = int(trials["trial_index"].nunique())
     grid = sns.catplot(
         data=plotted,
         x="trial",
@@ -121,7 +122,7 @@ def plot_fixed_layer_hyperparameter_tuning(run_dir: str | Path) -> Path:
         kind="point",
         sharex=False,
         height=4.0,
-        aspect=1.35,
+        aspect=max(1.35, min(2.6, 0.22 * trial_count)),
     )
     grid.set(ylim=(0, 1))
     grid.set_axis_labels("Explicit hyperparameter trial", "Validation score")

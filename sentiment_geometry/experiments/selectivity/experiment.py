@@ -904,6 +904,12 @@ class FixedLayerSelectivityExperiment:
                 "validation_recovery": _float(fitted.validation.recovery),
                 "validation_logit_flip": _float(fitted.validation.flip_rate),
                 "validation_sign_flip": fitted.validation.sign_flip_rate,
+                "best_epoch": int(fitted.fit_result.diagnostics["selected_epoch"]) + 1,
+                "epoch_budget": candidate.epochs,
+                "best_epoch_near_budget": (
+                    int(fitted.fit_result.diagnostics["selected_epoch"]) + 1
+                    >= 0.9 * candidate.epochs
+                ),
                 "selected": index == selected_index,
             }
             for index, (candidate, fitted) in enumerate(zip(candidates, fitted_candidates))

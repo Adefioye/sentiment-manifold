@@ -64,6 +64,10 @@ def test_selectivity_colab_notebook_is_clean_thin_and_uses_shared_run(method, fi
     assert "combine_fixed_layer_selectivity_runs(RUN_ROOT)" in source
     assert "GridSearchCV" not in source
     assert "ParameterGrid" not in source
+    if method == "das":
+        assert "Epoch-budget note" in source
+        assert '"best_epoch", "epoch_budget", "best_epoch_near_budget"' in source
+        assert "increase the epoch budget for every learning-rate trial equally" in source
 
 
 def test_selectivity_notebook_required_public_apis_are_importable():

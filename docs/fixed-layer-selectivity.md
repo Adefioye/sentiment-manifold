@@ -53,6 +53,16 @@ Use the same `RUN_ID` in all four. Each writes to
 `RUN_ROOT/methods/<method>/<model>/`; the final cell creates
 `RUN_ROOT/combined/` only after all eight method/model directories are complete.
 
+Each notebook defaults to `HF_TOKEN_SOURCE = "prompt"`, which requests the
+Hugging Face token through a hidden manual prompt just like the earlier AIT
+notebooks. Set it to `"colab_secret"` to read a Colab secret named `HF_TOKEN`
+instead. The token is verified without being printed, exposed through the
+environment only during an active model run, removed afterward even if the run
+fails, and cleared from the runtime cache in the final cell. Before
+authentication, the setup cell verifies that the editable checkout is the
+package actually imported, imports every package module, and checks each public
+API used by the notebook.
+
 Each run writes immutable manifests, random-label assignments, cached
 activations, probe checkpoints, per-example predictions, causal patching
 records, explicit tuning trials, metrics, and paired selectivity summaries. Training selectivity is the

@@ -1,4 +1,5 @@
 import json
+import importlib
 from pathlib import Path
 
 import pandas as pd
@@ -39,6 +40,17 @@ def test_selectivity_colab_notebook_is_clean_thin_and_uses_shared_run(
     assert 'run_and_display("qwen-0.6b")' in source
     assert "run_fixed_layer_selectivity(config)" in source
     assert "SHOW_PROGRESS = True" in source
+    assert 'HF_TOKEN_SOURCE = "prompt"' in source
+    assert "from getpass import getpass" in source
+    assert 'getpass(f"Enter {name} (input hidden): ")' in source
+    assert "HfApi(token=_token).whoami()" in source
+    assert 'os.environ[token_env] = get_runtime_secret("HF_TOKEN")' in source
+    assert "release_hf_environment(token_env)" in source
+    assert "clear_hf_credentials()" in source
+    assert "pkgutil.walk_packages" in source
+    assert "imported_package_root != expected_package_root" in source
+    assert '"sentiment_geometry.experiments.selectivity"' in source
+    assert '"sentiment_geometry.reporting"' in source
     assert "load_fixed_layer_selectivity_report(run_dir)" in source
     assert "report.training_memorization" in source
     assert "report.native_midpoint_comparison" in source
@@ -48,6 +60,25 @@ def test_selectivity_colab_notebook_is_clean_thin_and_uses_shared_run(
     assert "combine_fixed_layer_selectivity_runs(RUN_ROOT)" in source
     assert "GridSearchCV" not in source
     assert "ParameterGrid" not in source
+
+
+def test_selectivity_notebook_required_public_apis_are_importable():
+    required = {
+        "sentiment_geometry.experiments.selectivity": {
+            "FixedLayerSelectivityConfig",
+            "run_fixed_layer_selectivity",
+        },
+        "sentiment_geometry.reporting": {
+            "combine_fixed_layer_selectivity_runs",
+            "load_fixed_layer_selectivity_report",
+            "plot_fixed_layer_selectivity",
+            "plot_fixed_layer_run_diagnostics",
+        },
+    }
+
+    for module_name, names in required.items():
+        module = importlib.import_module(module_name)
+        assert not (names - set(dir(module)))
 
 
 def test_combiner_requires_all_methods_and_models_then_combines(tmp_path):

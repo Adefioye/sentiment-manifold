@@ -123,6 +123,7 @@ def notebook(method: str, details: dict) -> dict:
             DTYPE = "auto"
             RUN_EXPERIMENT = True
             SHOW_PROGRESS = True
+            HF_TOKEN_SOURCE = "prompt"  # "prompt" (hidden entry) or "colab_secret".
             """
         ).strip()
         + "\n\n"
@@ -163,22 +164,24 @@ def notebook(method: str, details: dict) -> dict:
         code(settings_source),
         markdown(
             """
-            ## 2. Install the package, mount Drive, and authenticate
+            ## 2. Install the package, verify imports, and mount Drive
 
-            Add `HF_TOKEN` to Colab Secrets with read access to the AIT dataset. The notebook
-            calls the package API; it does not reimplement extraction, fitting, randomization,
-            evaluation, or persistence.
+            The notebook imports the editable checkout, verifies its filesystem location, imports
+            every package module, and checks the public APIs used below. This catches stale Colab
+            modules before a long run starts. The notebook calls package APIs rather than
+            reimplementing extraction, fitting, randomization, evaluation, or persistence.
             """
         ),
         code(
             """
             import importlib
             import os
+            import pkgutil
             import subprocess
             import sys
             from pathlib import Path
 
-            from google.colab import drive, userdata
+            from google.colab import drive
 
             PROJECT_ROOT = Path("/content/sentiment-manifold")
             if not (PROJECT_ROOT / ".git").is_dir():
@@ -189,6 +192,9 @@ def notebook(method: str, details: dict) -> dict:
                     cwd=PROJECT_ROOT,
                     check=True,
                 )
+            project_commit = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=PROJECT_ROOT, text=True
+            ).strip()
             subprocess.run(
                 [sys.executable, "-m", "pip", "install", "-e", f"{PROJECT_ROOT}[notebooks]"],
                 check=True,
@@ -203,19 +209,114 @@ def notebook(method: str, details: dict) -> dict:
                     del sys.modules[module_name]
             importlib.invalidate_caches()
 
+            sentiment_geometry = importlib.import_module("sentiment_geometry")
+            expected_package_root = (PROJECT_ROOT / "sentiment_geometry").resolve()
+            imported_package_root = Path(sentiment_geometry.__file__).resolve().parent
+            if imported_package_root != expected_package_root:
+                raise ImportError(
+                    f"Imported sentiment_geometry from {imported_package_root}, "
+                    f"expected {expected_package_root}. Restart the runtime and rerun from the top."
+                )
+            module_names = sorted(
+                module.name
+                for module in pkgutil.walk_packages(
+                    sentiment_geometry.__path__, prefix="sentiment_geometry."
+                )
+                if module.name != "sentiment_geometry.__main__"
+            )
+            for module_name in module_names:
+                importlib.import_module(module_name)
+            required_apis = {
+                "sentiment_geometry.experiments.selectivity": {
+                    "FixedLayerSelectivityConfig", "run_fixed_layer_selectivity"
+                },
+                "sentiment_geometry.reporting": {
+                    "combine_fixed_layer_selectivity_runs",
+                    "load_fixed_layer_selectivity_report",
+                    "plot_fixed_layer_selectivity",
+                    "plot_fixed_layer_run_diagnostics",
+                },
+            }
+            for module_name, api_names in required_apis.items():
+                module = importlib.import_module(module_name)
+                missing_apis = sorted(name for name in api_names if not hasattr(module, name))
+                if missing_apis:
+                    raise ImportError(f"{module_name} is missing {missing_apis}.")
+
             drive.mount("/content/drive")
-            hf_token = userdata.get("HF_TOKEN")
-            if not hf_token:
-                raise RuntimeError("Add HF_TOKEN to Colab Secrets before running the notebook.")
-            os.environ["HF_TOKEN"] = hf_token
             RUN_ROOT = Path(DRIVE_ROOT) / RUN_ID
             RUN_ROOT.mkdir(parents=True, exist_ok=True)
+            print("Project commit:", project_commit)
+            print("Imported package from:", imported_package_root)
+            print(f"Imported and checked {len(module_names)} package modules.")
             print("Shared run root:", RUN_ROOT)
             """
         ),
         markdown(
             """
-            ## 3. Verify the protocol and define the reusable runner
+            ## 3. Authenticate to Hugging Face
+
+            The default `HF_TOKEN_SOURCE = "prompt"` asks for the token through a hidden manual
+            prompt, matching the earlier notebooks. To use Colab Secrets instead, add a secret
+            named `HF_TOKEN` and set `HF_TOKEN_SOURCE = "colab_secret"`. The token is kept only in
+            runtime memory, is never printed or written to Drive, and is placed in the environment
+            only while a model run is actively loading AIT data.
+            """
+        ),
+        code(
+            """
+            import gc
+            from getpass import getpass
+
+            from huggingface_hub import HfApi
+            from huggingface_hub.utils import reset_sessions
+
+            _RUNTIME_SECRETS = {}
+
+            def get_runtime_secret(name):
+                if name in _RUNTIME_SECRETS:
+                    return _RUNTIME_SECRETS[name]
+                if HF_TOKEN_SOURCE == "prompt":
+                    value = getpass(f"Enter {name} (input hidden): ").strip()
+                elif HF_TOKEN_SOURCE == "colab_secret":
+                    from google.colab import userdata
+
+                    value = (userdata.get(name) or "").strip()
+                else:
+                    raise ValueError("HF_TOKEN_SOURCE must be 'prompt' or 'colab_secret'.")
+                if not value:
+                    raise RuntimeError(f"{name} was not provided.")
+                _RUNTIME_SECRETS[name] = value
+                return value
+
+            def release_hf_environment(env_name="HF_TOKEN"):
+                os.environ.pop(env_name, None)
+                reset_sessions()
+                gc.collect()
+
+            def clear_hf_credentials(env_name="HF_TOKEN"):
+                release_hf_environment(env_name)
+                value = _RUNTIME_SECRETS.pop("HF_TOKEN", None)
+                if value is not None:
+                    del value
+
+            _token = get_runtime_secret("HF_TOKEN")
+            try:
+                hf_account = HfApi(token=_token).whoami()["name"]
+            except BaseException:
+                clear_hf_credentials()
+                raise
+            finally:
+                del _token
+            print(
+                f"Authenticated to Hugging Face as {hf_account}. "
+                "Token value was not displayed."
+            )
+            """
+        ),
+        markdown(
+            """
+            ## 4. Verify the protocol and define the reusable runner
 
             A trial list contains complete hand-chosen configurations, not a grid. There are no
             more than three user-adjusted hyperparameters for this method. Each model run includes
@@ -278,7 +379,12 @@ def notebook(method: str, details: dict) -> dict:
                 config = configured_run(model_name)
                 run_dir = Path(config.output.output_dir) / config.output.run_id
                 if RUN_EXPERIMENT:
-                    run_dir = run_fixed_layer_selectivity(config)
+                    token_env = config.data.hf_token_env
+                    os.environ[token_env] = get_runtime_secret("HF_TOKEN")
+                    try:
+                        run_dir = run_fixed_layer_selectivity(config)
+                    finally:
+                        release_hf_environment(token_env)
                 if not (run_dir / "metrics.csv").is_file():
                     raise FileNotFoundError(f"No completed results at {{run_dir}}")
 
@@ -368,14 +474,14 @@ def notebook(method: str, details: dict) -> dict:
                 return run_dir
             """
         ),
-        markdown("## 4. GPT-2 Small"),
+        markdown("## 5. GPT-2 Small"),
         code(
             """
             GPT2_RUN_DIR = run_and_display("gpt2-small")
             print("GPT-2 artifacts:", GPT2_RUN_DIR)
             """
         ),
-        markdown("## 5. Qwen3-0.6B Base"),
+        markdown("## 6. Qwen3-0.6B Base"),
         code(
             """
             QWEN_RUN_DIR = run_and_display("qwen-0.6b")
@@ -384,7 +490,7 @@ def notebook(method: str, details: dict) -> dict:
         ),
         markdown(
             """
-            ## 6. Aggregate and plot only after every notebook is complete
+            ## 7. Aggregate and plot only after every notebook is complete
 
             This cell refuses to aggregate partial studies. Once all eight method/model folders
             exist, it writes combined CSVs and the cross-method plots under `RUN_ROOT/combined`.
@@ -407,8 +513,12 @@ def notebook(method: str, details: dict) -> dict:
                     display(Image(filename=str(figure)))
                 display(pd.read_csv(COMBINED_DIR / "selectivity_summary.csv"))
             finally:
-                os.environ.pop("HF_TOKEN", None)
-                hf_token = None
+                clear_hf_credentials()
+                if os.environ.get("HF_TOKEN") is not None:
+                    raise RuntimeError("HF_TOKEN remains in the notebook environment.")
+                if "HF_TOKEN" in _RUNTIME_SECRETS:
+                    raise RuntimeError("HF_TOKEN remains in the runtime secret cache.")
+                print("Verified: HF_TOKEN was cleared from runtime memory and the environment.")
             """
         ),
     ]

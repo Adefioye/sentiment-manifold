@@ -1,9 +1,25 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
-from sentiment_geometry.experiments.selectivity import FixedLayerSelectivityConfig
-from sentiment_geometry.experiments.selectivity.datasets import randomize_data
-from sentiment_geometry.experiments.selectivity.datasets import PreparedSelectivityData
+import torch
+
+from sentiment_geometry.datasets import TextExample
+from sentiment_geometry.experiments.selectivity import (
+    FixedLayerSelectivityConfig,
+    run_fixed_layer_selectivity,
+)
+from sentiment_geometry.experiments.selectivity import experiment as selectivity_experiment
+from sentiment_geometry.experiments.selectivity.config import (
+    FixedLayerModelConfig,
+    SelectivityDataConfig,
+    SelectivityOutputConfig,
+    SelectivityProgressConfig,
+)
+from sentiment_geometry.experiments.selectivity.datasets import (
+    PreparedSelectivityData,
+    randomize_data,
+)
 from sentiment_geometry.probes import (
     LogisticProbeConfig,
     MLP1ProbeConfig,
@@ -13,7 +29,6 @@ from sentiment_geometry.probes import (
     fit_mean_difference_probe,
     fit_mlp1_probe,
 )
-from sentiment_geometry.datasets import TextExample
 
 PROJECT_ROOT = Path(__file__).parents[1]
 
@@ -167,3 +182,51 @@ def test_selectivity_config_loads_fixed_dataset_layers_and_manual_trials():
         "qwen-0.6b": {"toy_movie_review": 26, "full_ait": 26},
     }
     config.validate(require_layers=True)
+
+
+def test_selectivity_run_clears_the_loaded_models_device_cache(tmp_path, monkeypatch):
+    device = torch.device("cpu")
+    adapter = SimpleNamespace(
+        device_spec=SimpleNamespace(device=device),
+        n_layers=12,
+        provenance=dict,
+    )
+    config = FixedLayerSelectivityConfig(
+        models=[FixedLayerModelConfig(name="gpt2-small", layer=10)],
+        methods=["mean_diff"],
+        data=SelectivityDataConfig(datasets=["toy_movie_review"]),
+        output=SelectivityOutputConfig(
+            output_dir=str(tmp_path),
+            run_id="cache-cleanup",
+            cache_activations=False,
+            save_predictions=False,
+        ),
+        progress=SelectivityProgressConfig(enabled=False),
+    )
+    cleared_devices = []
+
+    monkeypatch.setattr(
+        selectivity_experiment.CausalLMAdapter,
+        "from_pretrained",
+        staticmethod(lambda *args, **kwargs: adapter),
+    )
+    monkeypatch.setattr(
+        selectivity_experiment.FixedLayerSelectivityExperiment,
+        "_prepare_data",
+        lambda *args, **kwargs: object(),
+    )
+    monkeypatch.setattr(
+        selectivity_experiment.FixedLayerSelectivityExperiment,
+        "_run_dataset",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        selectivity_experiment,
+        "clear_device_cache",
+        cleared_devices.append,
+    )
+
+    run_dir = run_fixed_layer_selectivity(config)
+
+    assert run_dir == tmp_path / "cache-cleanup"
+    assert cleared_devices == [device]

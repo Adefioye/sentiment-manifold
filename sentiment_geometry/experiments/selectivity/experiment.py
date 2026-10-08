@@ -137,8 +137,9 @@ class FixedLayerSelectivityExperiment:
                 )
                 data = self._prepare_data(dataset_name, dataset_model, adapter)
                 self._run_dataset(dataset_model, adapter, data, run_dir, all_tables)
+            adapter_device = adapter.device_spec.device
             del adapter
-            clear_device_cache()
+            clear_device_cache(adapter_device)
         for filename, rows in all_tables.items():
             if rows or filename != "predictions":
                 store.write_rows(f"{filename}.csv", rows)

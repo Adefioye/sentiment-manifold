@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from collections.abc import Sequence
-from typing import Any, Mapping
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -122,13 +122,33 @@ class FixedLayerSelectivityExperiment:
                 ):
                     dataset_model = self._validated_dataset_model(model, dataset_name, adapter)
                     data = self._prepare_data(dataset_name, dataset_model, adapter)
-                    activations = self._collect_activations(
-                        dataset_model, adapter, data, run_dir, allow_cache_read=False
-                    )
                     tables["sample_manifest"].extend(data.sample_manifest)
                     tables["pair_manifest"].extend(data.pair_manifest)
+                    signature = self._tuning_signature(dataset_model, dataset_name)
+                    checkpoint_path = (
+                        run_dir
+                        / "tuning_checkpoints"
+                        / model.name
+                        / f"{dataset_name}.json"
+                    )
+                    if checkpoint_path.is_file():
+                        checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+                        if checkpoint.get("signature") == signature:
+                            selections[model.name][data.name] = checkpoint["selection"]
+                            tables["tuning_trials"].extend(
+                                checkpoint.get("tuning_trials", [])
+                            )
+                            runtime_rows.append(checkpoint["runtime"])
+                            self._persist_tuning_progress(
+                                store, tables, runtime_rows, selections
+                            )
+                            continue
+                    activations = self._collect_activations(
+                        dataset_model, adapter, data, run_dir, allow_cache_read=True
+                    )
                     real_labels = {role: _labels(rows) for role, rows in data.examples.items()}
                     selected_settings: dict[str, Any] = {}
+                    first_trial_row = len(tables["tuning_trials"])
                     for method in tqdm(
                         self.config.methods,
                         desc=f"{model.name} {data.name} tune",
@@ -154,24 +174,69 @@ class FixedLayerSelectivityExperiment:
                                 tables=tables,
                             )
                     selections[model.name][data.name] = selected_settings
-                    runtime_rows.append(
+                    runtime = {
+                        "phase": "tuning",
+                        "model": model.name,
+                        "dataset": dataset_name,
+                        "layer": dataset_model.layer,
+                        **adapter.provenance(),
+                    }
+                    runtime_rows.append(runtime)
+                    checkpoint_store = RunArtifactStore(checkpoint_path.parent)
+                    checkpoint_store.write_json(
+                        checkpoint_path.name,
                         {
-                            "phase": "tuning",
-                            "model": model.name,
-                            "dataset": dataset_name,
-                            "layer": dataset_model.layer,
-                            **adapter.provenance(),
-                        }
+                            "signature": signature,
+                            "selection": selected_settings,
+                            "tuning_trials": tables["tuning_trials"][first_trial_row:],
+                            "runtime": runtime,
+                        },
                     )
+                    # Commit each completed dataset before starting the next long sweep.
+                    self._persist_tuning_progress(store, tables, runtime_rows, selections)
             finally:
                 adapter_device = adapter.device_spec.device
                 del adapter
                 clear_device_cache(adapter_device)
+        self._validate_selections(selections)
+        self._persist_tuning_progress(store, tables, runtime_rows, selections)
+        return run_dir
+
+    def _tuning_signature(
+        self, model: FixedLayerModelConfig, dataset_name: str
+    ) -> dict[str, Any]:
+        """Describe the scientific inputs that make a dataset tuning result reusable."""
+
+        method_configs = {
+            "das": asdict(self.config.das),
+            "logistic_regression": asdict(self.config.logistic_regression),
+            "mlp1": asdict(self.config.mlp1),
+        }
+        return {
+            "schema_version": 1,
+            "seed": self.config.seed,
+            "model": asdict(model),
+            "dataset": dataset_name,
+            "data": asdict(self.config.data),
+            "methods": list(self.config.methods),
+            "method_configs": {
+                method: method_configs[method]
+                for method in self.config.methods
+                if method in method_configs
+            },
+        }
+
+    @staticmethod
+    def _persist_tuning_progress(
+        store: RunArtifactStore,
+        tables: Mapping[str, Sequence[Mapping[str, Any]]],
+        runtime_rows: Sequence[Mapping[str, Any]],
+        selections: Mapping[str, Mapping[str, Mapping[str, Any]]],
+    ) -> None:
         for filename, rows in tables.items():
             store.write_rows(f"{filename}.csv", rows)
         store.write_rows("tuning_runtime.csv", runtime_rows)
         store.write_json("selected_hyperparameters.json", selections)
-        return run_dir
 
     def run_selected(
         self,
@@ -315,10 +380,33 @@ class FixedLayerSelectivityExperiment:
                     dataset_model = self._validated_dataset_model(model, dataset_name, adapter)
                     data = self._prepare_data(dataset_name, dataset_model, adapter)
                     base_settings = dict(learning_rate_selections[model.name][data.name]["das"])
+                    signature = {
+                        "schema_version": 1,
+                        "tuning": self._tuning_signature(dataset_model, dataset_name),
+                        "learning_rate_selection": base_settings,
+                        "epoch_budgets": list(budgets),
+                    }
+                    checkpoint_path = (
+                        run_dir
+                        / "das_epoch_tuning_checkpoints"
+                        / model.name
+                        / f"{dataset_name}.json"
+                    )
+                    if checkpoint_path.is_file():
+                        checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+                        if checkpoint.get("signature") == signature:
+                            selections[model.name][data.name]["das"] = checkpoint["selection"]
+                            trial_rows.extend(checkpoint.get("tuning_trials", []))
+                            runtime_rows.append(checkpoint["runtime"])
+                            self._persist_das_epoch_tuning_progress(
+                                store, trial_rows, runtime_rows, selections
+                            )
+                            continue
                     base_config = DASSelectivityConfig(**base_settings)
                     candidates = tuple(
                         replace(base_config, epochs=budget, trials=[]) for budget in budgets
                     )
+                    first_trial_row = len(trial_rows)
                     selected = self._tune_das(
                         model=dataset_model,
                         adapter=adapter,
@@ -329,24 +417,48 @@ class FixedLayerSelectivityExperiment:
                         progress_stage="DAS epoch tune",
                     )
                     selections[model.name][data.name]["das"] = asdict(selected)
-                    runtime_rows.append(
+                    runtime = {
+                        "phase": "das_epoch_tuning",
+                        "model": model.name,
+                        "dataset": dataset_name,
+                        "layer": dataset_model.layer,
+                        **adapter.provenance(),
+                    }
+                    runtime_rows.append(runtime)
+                    checkpoint_store = RunArtifactStore(checkpoint_path.parent)
+                    checkpoint_store.write_json(
+                        checkpoint_path.name,
                         {
-                            "phase": "das_epoch_tuning",
-                            "model": model.name,
-                            "dataset": dataset_name,
-                            "layer": dataset_model.layer,
-                            **adapter.provenance(),
-                        }
+                            "signature": signature,
+                            "selection": asdict(selected),
+                            "tuning_trials": trial_rows[first_trial_row:],
+                            "runtime": runtime,
+                        },
                     )
                     # Persist after each dataset so a completed dataset survives a later failure.
-                    store.write_rows("das_epoch_tuning_trials.csv", trial_rows)
-                    store.write_rows("das_epoch_tuning_runtime.csv", runtime_rows)
-                    store.write_json("das_epoch_selected_hyperparameters.json", selections)
+                    self._persist_das_epoch_tuning_progress(
+                        store, trial_rows, runtime_rows, selections
+                    )
             finally:
                 adapter_device = adapter.device_spec.device
                 del adapter
                 clear_device_cache(adapter_device)
+        self._validate_selections(selections)
+        self._persist_das_epoch_tuning_progress(
+            store, trial_rows, runtime_rows, selections
+        )
         return run_dir
+
+    @staticmethod
+    def _persist_das_epoch_tuning_progress(
+        store: RunArtifactStore,
+        trial_rows: Sequence[Mapping[str, Any]],
+        runtime_rows: Sequence[Mapping[str, Any]],
+        selections: Mapping[str, Mapping[str, Mapping[str, Any]]],
+    ) -> None:
+        store.write_rows("das_epoch_tuning_trials.csv", trial_rows)
+        store.write_rows("das_epoch_tuning_runtime.csv", runtime_rows)
+        store.write_json("das_epoch_selected_hyperparameters.json", selections)
 
     def _validated_dataset_model(
         self,

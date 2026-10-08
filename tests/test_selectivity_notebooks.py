@@ -35,11 +35,15 @@ def test_selectivity_colab_notebook_is_valid_thin_and_uses_shared_run(method, fi
     assert 'tuning_and_display("gpt2-small")' in source or (
         '"gpt2-small", run_tuning=RUN_LEARNING_RATE_TUNING["gpt2-small"]' in source
     )
-    assert 'final_training_and_display("gpt2-small", GPT2_SELECTIONS)' in source
+    assert 'final_training_and_display("gpt2-small", GPT2_SELECTIONS)' in source or (
+        'run_training=RUN_FINAL_TRAINING_BY_MODEL["gpt2-small"]' in source
+    )
     assert 'tuning_and_display("qwen-0.6b")' in source or (
         '"qwen-0.6b", run_tuning=RUN_LEARNING_RATE_TUNING["qwen-0.6b"]' in source
     )
-    assert 'final_training_and_display("qwen-0.6b", QWEN_SELECTIONS)' in source
+    assert 'final_training_and_display("qwen-0.6b", QWEN_SELECTIONS)' in source or (
+        'run_training=RUN_FINAL_TRAINING_BY_MODEL["qwen-0.6b"]' in source
+    )
     assert "tune_fixed_layer_selectivity(config)" in source
     assert "run_fixed_layer_selectivity_with_frozen_hyperparameters(" in source
     assert "plot_fixed_layer_hyperparameter_tuning(run_dir)" in source
@@ -68,10 +72,16 @@ def test_selectivity_colab_notebook_is_valid_thin_and_uses_shared_run(method, fi
     assert "ParameterGrid" not in source
     if method == "das":
         assert "Two-stage tuning note" in source
+        assert "Qwen uses five approximately" in source
+        assert "GPT2_MANUAL_TRIALS = [" in source
+        assert "QWEN_MANUAL_TRIALS = [" in source
+        assert "MANUAL_TRIALS_BY_MODEL[model_name]" in source
         assert '"best_epoch", "epoch_budget", "best_epoch_near_budget"' in source
         assert "DAS_EPOCH_BUDGETS = [32, 64, 96, 128, 160]" in source
         assert '"gpt2-small": False' in source
         assert '"qwen-0.6b": True' in source
+        assert "RUN_FINAL_TRAINING_BY_MODEL" in source
+        assert "RUN_DAS_EPOCH_TUNING[model_name]" in source
         assert "tune_fixed_layer_das_epoch_budgets(" in source
         assert "plot_fixed_layer_das_epoch_tuning(run_dir)" in source
         assert "das_epoch_tuning_and_display(" in source

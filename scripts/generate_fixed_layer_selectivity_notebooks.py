@@ -7,7 +7,6 @@ from hashlib import sha1
 from pathlib import Path
 from textwrap import dedent
 
-
 ROOT = Path(__file__).parents[1]
 NOTEBOOK_DIR = ROOT / "notebooks"
 
@@ -47,7 +46,8 @@ METHODS = {
         "title": "One-dimensional DAS random-label selectivity",
         "filename": "colab_fixed_layer_das_selectivity",
         "description": (
-            "Ten explicit DAS trials vary only learning rate across two orders of magnitude. "
+            "GPT-2's completed sweep used ten learning rates; Qwen uses five approximately "
+            "log-spaced rates across the same two orders of magnitude. "
             "A second five-trial sweep then varies only the epoch budget at each dataset's "
             "selected learning rate. Validation IIA remains the primary selection metric."
         ),
@@ -56,11 +56,12 @@ METHODS = {
             "rate is the only changing factor. The next section freezes the separately selected "
             "ToyMovieReview and full-AIT learning rates, then compares epoch budgets of 32, 64, "
             "96, 128, and 160 using validation IIA only. The original learning-rate artifacts are "
-            "preserved."
+            "preserved. Both stages checkpoint each completed dataset and resume only when the "
+            "saved scientific configuration matches exactly."
         ),
         "settings": dedent(
             """
-            MANUAL_TRIALS = [
+            GPT2_MANUAL_TRIALS = [
                 {"learning_rate": 0.0001, "weight_decay": 0.0, "epochs": 64},
                 {"learning_rate": 0.0002, "weight_decay": 0.0, "epochs": 64},
                 {"learning_rate": 0.0003, "weight_decay": 0.0, "epochs": 64},
@@ -72,9 +73,22 @@ METHODS = {
                 {"learning_rate": 0.005, "weight_decay": 0.0, "epochs": 64},
                 {"learning_rate": 0.01, "weight_decay": 0.0, "epochs": 64},
             ]
+
+            QWEN_MANUAL_TRIALS = [
+                {"learning_rate": 0.0001, "weight_decay": 0.0, "epochs": 64},
+                {"learning_rate": 0.0003, "weight_decay": 0.0, "epochs": 64},
+                {"learning_rate": 0.001, "weight_decay": 0.0, "epochs": 64},
+                {"learning_rate": 0.003, "weight_decay": 0.0, "epochs": 64},
+                {"learning_rate": 0.01, "weight_decay": 0.0, "epochs": 64},
+            ]
+
+            MANUAL_TRIALS_BY_MODEL = {
+                "gpt2-small": GPT2_MANUAL_TRIALS,
+                "qwen-0.6b": QWEN_MANUAL_TRIALS,
+            }
             """
         ).strip(),
-        "override": "config.das.trials = list(MANUAL_TRIALS)",
+        "override": "config.das.trials = list(MANUAL_TRIALS_BY_MODEL[model_name])",
     },
     "mlp1": {
         "number": 15,
@@ -144,11 +158,20 @@ def notebook(method: str, details: dict) -> dict:
         das_settings = dedent(
             """
             # GPT-2 learning-rate tuning is already complete on Drive. Keep this False.
+            # Qwen's interrupted run saved activations but no durable ToyMovieReview LR
+            # selection, so True deliberately reruns ToyMovieReview before full AIT.
             RUN_LEARNING_RATE_TUNING = {
                 "gpt2-small": False,
                 "qwen-0.6b": True,
             }
-            RUN_DAS_EPOCH_TUNING = True
+            RUN_DAS_EPOCH_TUNING = {
+                "gpt2-small": False,
+                "qwen-0.6b": True,
+            }
+            RUN_FINAL_TRAINING_BY_MODEL = {
+                "gpt2-small": False,
+                "qwen-0.6b": True,
+            }
             DAS_EPOCH_BUDGETS = [32, 64, 96, 128, 160]
             """
         ).strip()
@@ -220,7 +243,8 @@ def notebook(method: str, details: dict) -> dict:
 
                 Run this after Qwen's learning-rate sweep finishes. It freezes the separately
                 selected ToyMovieReview and full-AIT learning rates and varies only the epoch
-                budget over `32, 64, 96, 128, 160`, using validation IIA for selection.
+                budget over `32, 64, 96, 128, 160`, using validation IIA for selection. Completed
+                dataset sweeps are checkpointed and skipped after a matching-config restart.
                 """
             ),
             code(
@@ -539,7 +563,7 @@ def notebook(method: str, details: dict) -> dict:
                     raise ValueError("Epoch-budget tuning is only defined for DAS.")
                 config = configured_run(model_name)
                 run_dir = Path(config.output.output_dir) / config.output.run_id
-                if RUN_DAS_EPOCH_TUNING:
+                if RUN_DAS_EPOCH_TUNING[model_name]:
                     token_env = config.data.hf_token_env
                     os.environ[token_env] = get_runtime_secret("HF_TOKEN")
                     try:
@@ -571,10 +595,12 @@ def notebook(method: str, details: dict) -> dict:
                 display(pd.json_normalize(selections, sep=" → ").T.rename(columns={{0: "value"}}))
                 return run_dir, selections
 
-            def final_training_and_display(model_name, selections):
+            def final_training_and_display(
+                model_name, selections, run_training=RUN_FINAL_TRAINING
+            ):
                 config = configured_run(model_name)
                 run_dir = Path(config.output.output_dir) / config.output.run_id
-                if RUN_FINAL_TRAINING:
+                if run_training:
                     token_env = config.data.hf_token_env
                     os.environ[token_env] = get_runtime_secret("HF_TOKEN")
                     try:
@@ -702,7 +728,11 @@ def notebook(method: str, details: dict) -> dict:
         ),
         code(
             """
-            GPT2_RUN_DIR = final_training_and_display("gpt2-small", GPT2_SELECTIONS)
+            GPT2_RUN_DIR = final_training_and_display(
+                "gpt2-small",
+                GPT2_SELECTIONS,
+                run_training=RUN_FINAL_TRAINING_BY_MODEL["gpt2-small"],
+            )
             print("GPT-2 final artifacts:", GPT2_RUN_DIR)
             """
         ),
@@ -712,7 +742,9 @@ def notebook(method: str, details: dict) -> dict:
 
             ### 6a. Tune on real validation data and visualize every trial
 
-            This repeats the complete selection process independently for Qwen and both datasets.
+            The earlier interrupted Qwen run did not persist a ToyMovieReview learning-rate
+            selection. Section 6a therefore reruns the five Qwen learning-rate candidates for
+            ToyMovieReview, saves its validation-selected rate, and then continues to full AIT.
 
             {tuning_note}
             """
@@ -747,7 +779,11 @@ def notebook(method: str, details: dict) -> dict:
         ),
         code(
             """
-            QWEN_RUN_DIR = final_training_and_display("qwen-0.6b", QWEN_SELECTIONS)
+            QWEN_RUN_DIR = final_training_and_display(
+                "qwen-0.6b",
+                QWEN_SELECTIONS,
+                run_training=RUN_FINAL_TRAINING_BY_MODEL["qwen-0.6b"],
+            )
             print("Qwen final artifacts:", QWEN_RUN_DIR)
             """
         ),

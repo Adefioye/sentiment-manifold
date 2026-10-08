@@ -42,6 +42,11 @@ configuration. Within each pair, both fits use the same optimization seed. DAS
 selects primarily by validation IIA. MLP-1 fixes the random-label training
 duration to the paired real-task duration.
 
+For the in-progress shared DAS run, GPT-2 retains its completed ten-rate sweep while Qwen
+uses the prespecified five-rate subset `1e-4, 3e-4, 1e-3, 3e-3, 1e-2`. This model-specific
+search-space difference is recorded in each run's resolved configuration rather than being
+silently presented as the same sweep.
+
 The four Colab entry points are:
 
 - [`12_colab_fixed_layer_mean_difference_selectivity.ipynb`](../notebooks/12_colab_fixed_layer_mean_difference_selectivity.ipynb)
@@ -69,6 +74,12 @@ records, explicit tuning trials, metrics, and paired selectivity summaries. Trai
 random-label memorization diagnostic; validation and test selectivity measure
 held-out behavior and should be interpreted alongside the two underlying
 accuracies.
+
+Validation tuning writes a dataset checkpoint immediately after each completed
+model/dataset sweep. Re-running the same model with the same scientific configuration skips
+those completed datasets and resumes at the first unfinished one. A changed trial list, layer,
+model revision, dataset configuration, or seed invalidates the matching checkpoint and reruns
+that dataset. Activation caches are also reused only after their immutable example IDs match.
 
 Colab progress is enabled by default. The notebooks show nested progress for
 activation batches, dataset/method/seed stages, MLP-1 epochs, DAS preparation

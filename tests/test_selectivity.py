@@ -303,6 +303,94 @@ def test_tuning_stage_persists_selection_without_final_metrics(tmp_path, monkeyp
     assert not (run_dir / "metrics.csv").exists()
 
 
+def test_tuning_resumes_completed_dataset_after_later_failure(tmp_path, monkeypatch):
+    device = torch.device("cpu")
+    adapter = SimpleNamespace(
+        device_spec=SimpleNamespace(device=device),
+        n_layers=12,
+        provenance=lambda: {"revision": "test"},
+    )
+    examples = {
+        role: tuple(
+            TextExample(text=f"{role}-{index}", label=index % 2, example_id=f"{role}-{index}")
+            for index in range(4)
+        )
+        for role in ("train", "validation", "test")
+    }
+
+    def prepared(dataset_name):
+        return PreparedSelectivityData(
+            name=dataset_name,
+            examples=examples,
+            pairs={role: () for role in examples},
+            answers={0: (" no",), 1: (" yes",)},
+            sample_manifest=(),
+            pair_manifest=(),
+            provenance={},
+        )
+
+    config = FixedLayerSelectivityConfig(
+        models=[
+            FixedLayerModelConfig(
+                name="gpt2-small",
+                layers={"toy_movie_review": 10, "full_ait": 10},
+            )
+        ],
+        methods=["mean_diff"],
+        data=SelectivityDataConfig(datasets=["toy_movie_review", "full_ait"]),
+        output=SelectivityOutputConfig(output_dir=str(tmp_path), run_id="resumable"),
+        progress=SelectivityProgressConfig(enabled=False),
+    )
+    monkeypatch.setattr(
+        selectivity_experiment.CausalLMAdapter,
+        "from_pretrained",
+        staticmethod(lambda *args, **kwargs: adapter),
+    )
+    monkeypatch.setattr(
+        selectivity_experiment.FixedLayerSelectivityExperiment,
+        "_prepare_data",
+        lambda self, dataset_name, *args: prepared(dataset_name),
+    )
+    collected = []
+    fail_full_ait = True
+
+    def collect(*args, **kwargs):
+        nonlocal fail_full_ait
+        data = args[3]
+        collected.append(data.name)
+        if data.name == "full_ait" and fail_full_ait:
+            raise RuntimeError("simulated interruption")
+        return {
+            role: np.zeros((len(rows), 2), dtype=np.float32)
+            for role, rows in examples.items()
+        }
+
+    monkeypatch.setattr(
+        selectivity_experiment.FixedLayerSelectivityExperiment,
+        "_collect_activations",
+        collect,
+    )
+
+    with pytest.raises(RuntimeError, match="simulated interruption"):
+        tune_fixed_layer_selectivity(config)
+
+    run_dir = tmp_path / "resumable"
+    partial = json.loads((run_dir / "selected_hyperparameters.json").read_text())
+    assert partial == {"gpt2-small": {"toy_movie_review": {"mean_diff": {}}}}
+
+    fail_full_ait = False
+    tune_fixed_layer_selectivity(config)
+
+    completed = json.loads((run_dir / "selected_hyperparameters.json").read_text())
+    assert set(completed["gpt2-small"]) == {"toy_movie_review", "full_ait"}
+    assert collected == ["toy_movie_review", "full_ait", "full_ait"]
+
+    config.seed = 1
+    tune_fixed_layer_selectivity(config)
+
+    assert collected[-2:] == ["toy_movie_review", "full_ait"]
+
+
 def test_das_epoch_tuning_preserves_learning_rate_artifacts(tmp_path, monkeypatch):
     device = torch.device("cpu")
     adapter = SimpleNamespace(
@@ -353,8 +441,10 @@ def test_das_epoch_tuning_preserves_learning_rate_artifacts(tmp_path, monkeypatc
     )
 
     observed = {}
+    tuning_calls = []
 
     def fake_tune_das(*, data, tables, candidates, table_name, **kwargs):
+        tuning_calls.append(data.name)
         expected_lr = 0.003 if data.name == "toy_movie_review" else 0.001
         assert [candidate.epochs for candidate in candidates] == [32, 64, 96, 128, 160]
         assert {candidate.learning_rate for candidate in candidates} == {expected_lr}
@@ -387,3 +477,7 @@ def test_das_epoch_tuning_preserves_learning_rate_artifacts(tmp_path, monkeypatc
     assert selected["gpt2-small"]["full_ait"]["das"]["epochs"] == 128
     assert (result / "tuning_trials.csv").read_text() == original_trials
     assert json.loads((result / "selected_hyperparameters.json").read_text()) == base
+
+    tune_fixed_layer_das_epoch_budgets(config, base, [32, 64, 96, 128, 160])
+
+    assert tuning_calls == ["toy_movie_review", "full_ait"]

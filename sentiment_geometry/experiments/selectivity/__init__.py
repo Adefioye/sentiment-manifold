@@ -11,7 +11,12 @@ from .config import (
     SelectivityOutputConfig,
     SelectivityProgressConfig,
 )
-from .experiment import FixedLayerSelectivityExperiment, run_fixed_layer_selectivity
+from .experiment import (
+    FixedLayerSelectivityExperiment,
+    run_fixed_layer_selectivity,
+    run_fixed_layer_selectivity_with_frozen_hyperparameters,
+    tune_fixed_layer_selectivity,
+)
 
 __all__ = [
     "DASSelectivityConfig",
@@ -25,4 +30,6 @@ __all__ = [
     "SelectivityOutputConfig",
     "SelectivityProgressConfig",
     "run_fixed_layer_selectivity",
+    "run_fixed_layer_selectivity_with_frozen_hyperparameters",
+    "tune_fixed_layer_selectivity",
 ]

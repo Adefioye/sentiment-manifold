@@ -27,18 +27,22 @@ def _source(path: Path) -> str:
 
 
 @pytest.mark.parametrize(("method", "filename"), NOTEBOOKS.items())
-def test_selectivity_colab_notebook_is_clean_thin_and_uses_shared_run(
-    method, filename
-):
+def test_selectivity_colab_notebook_is_clean_thin_and_uses_shared_run(method, filename):
     source = _source(PROJECT_ROOT / "notebooks" / filename)
 
     assert f'METHOD = "{method}"' in source
     assert 'RUN_ID = "fixed-layer-selectivity-v1"' in source
     assert '"gpt2-small": {"toy_movie_review": 10, "full_ait": 11}' in source
     assert '"qwen-0.6b": {"toy_movie_review": 26, "full_ait": 26}' in source
-    assert 'run_and_display("gpt2-small")' in source
-    assert 'run_and_display("qwen-0.6b")' in source
-    assert "run_fixed_layer_selectivity(config)" in source
+    assert 'tuning_and_display("gpt2-small")' in source
+    assert 'final_training_and_display("gpt2-small", GPT2_SELECTIONS)' in source
+    assert 'tuning_and_display("qwen-0.6b")' in source
+    assert 'final_training_and_display("qwen-0.6b", QWEN_SELECTIONS)' in source
+    assert "tune_fixed_layer_selectivity(config)" in source
+    assert "run_fixed_layer_selectivity_with_frozen_hyperparameters(" in source
+    assert "plot_fixed_layer_hyperparameter_tuning(run_dir)" in source
+    assert "RUN_TUNING = True" in source
+    assert "RUN_FINAL_TRAINING = True" in source
     assert "SHOW_PROGRESS = True" in source
     assert 'HF_TOKEN_SOURCE = "prompt"' in source
     assert "from getpass import getpass" in source
@@ -66,12 +70,16 @@ def test_selectivity_notebook_required_public_apis_are_importable():
     required = {
         "sentiment_geometry.experiments.selectivity": {
             "FixedLayerSelectivityConfig",
-            "run_fixed_layer_selectivity",
+            "run_fixed_layer_selectivity_with_frozen_hyperparameters",
+            "tune_fixed_layer_selectivity",
         },
         "sentiment_geometry.reporting": {
             "combine_fixed_layer_selectivity_runs",
+            "load_fixed_layer_hyperparameter_selections",
+            "load_fixed_layer_tuning_trials",
             "load_fixed_layer_selectivity_report",
             "plot_fixed_layer_selectivity",
+            "plot_fixed_layer_hyperparameter_tuning",
             "plot_fixed_layer_run_diagnostics",
         },
     }

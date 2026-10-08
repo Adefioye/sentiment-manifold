@@ -57,9 +57,7 @@ def _finite_or_negative_infinity(value: float) -> float:
 
 
 def _balanced_accuracy(labels: np.ndarray, predictions: np.ndarray) -> float:
-    recalls = [
-        float((predictions[labels == label] == label).mean()) for label in (0, 1)
-    ]
+    recalls = [float((predictions[labels == label] == label).mean()) for label in (0, 1)]
     return float(np.mean(recalls))
 
 
@@ -76,10 +74,278 @@ class FixedLayerSelectivityExperiment:
         config.validate(require_layers=True)
         self.config = config
 
-    def run(self) -> Path:
-        run_dir = Path(self.config.output.output_dir) / (
-            self.config.output.run_id or _run_name()
+    def _run_directory(self, *, require_run_id: bool = False) -> Path:
+        if require_run_id and self.config.output.run_id is None:
+            raise ValueError(
+                "Staged tuning/final execution requires output.run_id so both stages "
+                "resolve the same artifact directory"
+            )
+        return Path(self.config.output.output_dir) / (self.config.output.run_id or _run_name())
+
+    def tune(self) -> Path:
+        """Tune on real validation data and persist a frozen selection, without final fits."""
+
+        run_dir = self._run_directory(require_run_id=True)
+        store = RunArtifactStore(run_dir)
+        store.write_json("resolved_config.json", self.config.to_dict())
+        tables: dict[str, list[dict[str, Any]]] = {
+            "sample_manifest": [],
+            "pair_manifest": [],
+            "tuning_trials": [],
+        }
+        selections: dict[str, dict[str, dict[str, Any]]] = {}
+        runtime_rows: list[dict[str, Any]] = []
+        models = tqdm(
+            self.config.models,
+            desc="Selectivity tuning models",
+            leave=True,
+            disable=not self.config.progress.enabled,
+            unit="model",
         )
+        for model in models:
+            models.set_postfix(model=model.name)
+            adapter = CausalLMAdapter.from_pretrained(
+                model.hub_name,
+                resolve_device(model.device, model.dtype),
+                revision=model.revision,
+                prepend_bos=model.prepend_bos,
+            )
+            try:
+                selections[model.name] = {}
+                for dataset_name in tqdm(
+                    self.config.data.datasets,
+                    desc=f"{model.name} tuning datasets",
+                    leave=self.config.progress.leave_completed,
+                    disable=not self.config.progress.enabled,
+                    unit="dataset",
+                ):
+                    dataset_model = self._validated_dataset_model(model, dataset_name, adapter)
+                    data = self._prepare_data(dataset_name, dataset_model, adapter)
+                    activations = self._collect_activations(
+                        dataset_model, adapter, data, run_dir, allow_cache_read=False
+                    )
+                    tables["sample_manifest"].extend(data.sample_manifest)
+                    tables["pair_manifest"].extend(data.pair_manifest)
+                    real_labels = {role: _labels(rows) for role, rows in data.examples.items()}
+                    selected_settings: dict[str, Any] = {}
+                    for method in tqdm(
+                        self.config.methods,
+                        desc=f"{model.name} {data.name} tune",
+                        leave=self.config.progress.leave_completed,
+                        disable=not self.config.progress.enabled,
+                        unit="method",
+                    ):
+                        if method == "das":
+                            selected = self._tune_das(
+                                model=dataset_model,
+                                adapter=adapter,
+                                data=data,
+                                tables=tables,
+                            )
+                            selected_settings[method] = asdict(selected)
+                        else:
+                            selected_settings[method] = self._tune_probe(
+                                model=dataset_model,
+                                data=data,
+                                activations=activations,
+                                real_labels=real_labels,
+                                method=method,
+                                tables=tables,
+                            )
+                    selections[model.name][data.name] = selected_settings
+                    runtime_rows.append(
+                        {
+                            "phase": "tuning",
+                            "model": model.name,
+                            "dataset": dataset_name,
+                            "layer": dataset_model.layer,
+                            **adapter.provenance(),
+                        }
+                    )
+            finally:
+                adapter_device = adapter.device_spec.device
+                del adapter
+                clear_device_cache(adapter_device)
+        for filename, rows in tables.items():
+            store.write_rows(f"{filename}.csv", rows)
+        store.write_rows("tuning_runtime.csv", runtime_rows)
+        store.write_json("selected_hyperparameters.json", selections)
+        return run_dir
+
+    def run_selected(
+        self,
+        selections: Mapping[str, Mapping[str, Mapping[str, Any]]] | None = None,
+    ) -> Path:
+        """Run paired real/random tasks using previously tuned frozen settings."""
+
+        run_dir = self._run_directory(require_run_id=True)
+        if selections is None:
+            selection_path = run_dir / "selected_hyperparameters.json"
+            if not selection_path.is_file():
+                raise FileNotFoundError(f"Run validation tuning first; missing {selection_path}")
+            selections = json.loads(selection_path.read_text(encoding="utf-8"))
+        self._validate_selections(selections)
+        store = RunArtifactStore(run_dir)
+        store.write_json("resolved_config.json", self.config.to_dict())
+        store.write_json(
+            "confirmed_hyperparameters.json",
+            {model: dict(datasets) for model, datasets in selections.items()},
+        )
+        tables: dict[str, list[dict[str, Any]]] = {
+            "metrics": [],
+            "predictions": [],
+            "causal_metrics": [],
+            "patching_records": [],
+            "random_label_assignments": [],
+            "random_pair_manifest": [],
+            "sample_manifest": [],
+            "pair_manifest": [],
+            "fit_metadata": [],
+            "training_history": [],
+        }
+        runtime_rows: list[dict[str, Any]] = []
+        models = tqdm(
+            self.config.models,
+            desc="Selectivity final models",
+            leave=True,
+            disable=not self.config.progress.enabled,
+            unit="model",
+        )
+        for model in models:
+            models.set_postfix(model=model.name)
+            adapter = CausalLMAdapter.from_pretrained(
+                model.hub_name,
+                resolve_device(model.device, model.dtype),
+                revision=model.revision,
+                prepend_bos=model.prepend_bos,
+            )
+            try:
+                for dataset_name in tqdm(
+                    self.config.data.datasets,
+                    desc=f"{model.name} final datasets",
+                    leave=self.config.progress.leave_completed,
+                    disable=not self.config.progress.enabled,
+                    unit="dataset",
+                ):
+                    dataset_model = self._validated_dataset_model(model, dataset_name, adapter)
+                    data = self._prepare_data(dataset_name, dataset_model, adapter)
+                    activations = self._collect_activations(
+                        dataset_model, adapter, data, run_dir, allow_cache_read=True
+                    )
+                    tables["sample_manifest"].extend(data.sample_manifest)
+                    tables["pair_manifest"].extend(data.pair_manifest)
+                    self._run_dataset_with_selected_settings(
+                        dataset_model,
+                        adapter,
+                        data,
+                        activations,
+                        run_dir,
+                        tables,
+                        selections[model.name][data.name],
+                    )
+                    runtime_rows.append(
+                        {
+                            "phase": "final",
+                            "model": model.name,
+                            "dataset": dataset_name,
+                            "layer": dataset_model.layer,
+                            **adapter.provenance(),
+                        }
+                    )
+            finally:
+                adapter_device = adapter.device_spec.device
+                del adapter
+                clear_device_cache(adapter_device)
+        for filename, rows in tables.items():
+            if rows or filename != "predictions":
+                store.write_rows(f"{filename}.csv", rows)
+        store.write_rows("runtime.csv", runtime_rows)
+        store.write_rows("selectivity_summary.csv", self._selectivity_summary(tables["metrics"]))
+        return run_dir
+
+    def _validated_dataset_model(
+        self,
+        model: FixedLayerModelConfig,
+        dataset_name: str,
+        adapter: CausalLMAdapter,
+    ) -> FixedLayerModelConfig:
+        layer = model.layer_for(dataset_name)
+        if layer > adapter.n_layers:
+            raise ValueError(
+                f"{model.name}/{dataset_name} layer {layer} exceeds boundary {adapter.n_layers}"
+            )
+        return replace(model, layer=layer)
+
+    def _activation_cache_path(
+        self, run_dir: Path, model: FixedLayerModelConfig, dataset: str
+    ) -> Path:
+        assert model.layer is not None
+        return run_dir / "activations" / model.name / f"{dataset}-layer{model.layer:02d}.npz"
+
+    def _collect_activations(
+        self,
+        model: FixedLayerModelConfig,
+        adapter: CausalLMAdapter,
+        data: PreparedSelectivityData,
+        run_dir: Path,
+        *,
+        allow_cache_read: bool,
+    ) -> dict[str, np.ndarray]:
+        assert model.layer is not None
+        cache_path = self._activation_cache_path(run_dir, model, data.name)
+        if allow_cache_read and cache_path.is_file():
+            with np.load(cache_path) as cached:
+                for role, rows in data.examples.items():
+                    expected_ids = np.asarray([row.example_id for row in rows])
+                    cached_ids = cached[f"{role}_example_ids"]
+                    if not np.array_equal(cached_ids, expected_ids):
+                        raise ValueError(
+                            f"Cached activation IDs do not match {model.name}/{data.name}/{role}"
+                        )
+                return {role: np.asarray(cached[f"{role}_activations"]) for role in data.examples}
+        activations = {
+            role: extract_last_token_activations(
+                adapter,
+                rows,
+                model.layer,
+                batch_size=model.batch_size,
+                show_progress=self.config.progress.enabled,
+                progress_description=f"{model.name} {data.name} {role} activations",
+                progress_leave=self.config.progress.leave_completed,
+            )
+            for role, rows in data.examples.items()
+        }
+        if self.config.output.cache_activations:
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            np.savez_compressed(
+                cache_path,
+                **{f"{role}_activations": values for role, values in activations.items()},
+                **{
+                    f"{role}_example_ids": np.asarray(
+                        [row.example_id for row in data.examples[role]]
+                    )
+                    for role in data.examples
+                },
+            )
+        return activations
+
+    def _validate_selections(
+        self, selections: Mapping[str, Mapping[str, Mapping[str, Any]]]
+    ) -> None:
+        missing = [
+            f"{model.name}/{dataset}/{method}"
+            for model in self.config.models
+            for dataset in self.config.data.datasets
+            for method in self.config.methods
+            if model.name not in selections
+            or dataset not in selections[model.name]
+            or method not in selections[model.name][dataset]
+        ]
+        if missing:
+            raise ValueError(f"Missing frozen hyperparameter selections: {missing}")
+
+    def run(self) -> Path:
+        run_dir = Path(self.config.output.output_dir) / (self.config.output.run_id or _run_name())
         store = RunArtifactStore(run_dir)
         store.write_json("resolved_config.json", self.config.to_dict())
         all_tables: dict[str, list[dict[str, Any]]] = {
@@ -177,9 +443,7 @@ class FixedLayerSelectivityExperiment:
                 model.layer,
                 batch_size=model.batch_size,
                 show_progress=self.config.progress.enabled,
-                progress_description=(
-                    f"{model.name} {data.name} {role} activations"
-                ),
+                progress_description=(f"{model.name} {data.name} {role} activations"),
                 progress_leave=self.config.progress.leave_completed,
             )
         if self.config.output.cache_activations:
@@ -187,10 +451,7 @@ class FixedLayerSelectivityExperiment:
             cache_dir.mkdir(parents=True, exist_ok=True)
             np.savez_compressed(
                 cache_dir / f"{data.name}-layer{model.layer:02d}.npz",
-                **{
-                    f"{role}_activations": values
-                    for role, values in activations.items()
-                },
+                **{f"{role}_activations": values for role, values in activations.items()},
                 **{
                     f"{role}_example_ids": np.asarray(
                         [row.example_id for row in data.examples[role]]
@@ -237,9 +498,7 @@ class FixedLayerSelectivityExperiment:
         for run_seed in seeds:
             seeds.set_postfix(seed=run_seed)
             randomized = randomize_data(data, seed=run_seed)
-            random_labels = {
-                role: _labels(rows) for role, rows in randomized.examples.items()
-            }
+            random_labels = {role: _labels(rows) for role, rows in randomized.examples.items()}
             tables["random_label_assignments"].extend(
                 {
                     "model": model.name,
@@ -292,6 +551,79 @@ class FixedLayerSelectivityExperiment:
                         hyperparameters=selected_settings[method],
                     )
 
+    def _run_dataset_with_selected_settings(
+        self,
+        model: FixedLayerModelConfig,
+        adapter: CausalLMAdapter,
+        data: PreparedSelectivityData,
+        activations: Mapping[str, np.ndarray],
+        run_dir: Path,
+        tables: dict[str, list[dict[str, Any]]],
+        selected_settings: Mapping[str, Any],
+    ) -> None:
+        """Run final paired fits only; settings must already be validation-selected."""
+
+        real_labels = {role: _labels(rows) for role, rows in data.examples.items()}
+        seeds = tqdm(
+            self.config.random_labels.seeds,
+            desc=f"{model.name} {data.name} final paired seeds",
+            leave=self.config.progress.leave_completed,
+            disable=not self.config.progress.enabled,
+            unit="seed",
+        )
+        for run_seed in seeds:
+            seeds.set_postfix(seed=run_seed)
+            randomized = randomize_data(data, seed=run_seed)
+            random_labels = {role: _labels(rows) for role, rows in randomized.examples.items()}
+            tables["random_label_assignments"].extend(
+                {"model": model.name, "layer": model.layer, **row}
+                for row in randomized.assignment_rows
+            )
+            tables["random_pair_manifest"].extend(
+                {
+                    "model": model.name,
+                    "dataset": data.name,
+                    "layer": model.layer,
+                    "seed": run_seed,
+                    "role": role,
+                    "source_example_id": pair.clean.example_id,
+                    "source_random_label": pair.clean.label,
+                    "target_example_id": pair.corrupted.example_id,
+                    "target_random_label": pair.corrupted.label,
+                }
+                for role, pairs in randomized.pairs.items()
+                for pair in pairs
+            )
+            for method in self.config.methods:
+                settings = selected_settings[method]
+                if method == "das":
+                    self._run_das(
+                        model=model,
+                        adapter=adapter,
+                        data=data,
+                        randomized=randomized,
+                        activations=activations,
+                        real_labels=real_labels,
+                        random_labels=random_labels,
+                        run_seed=run_seed,
+                        run_dir=run_dir,
+                        tables=tables,
+                        selected_config=DASSelectivityConfig(**dict(settings)),
+                    )
+                else:
+                    self._run_probe(
+                        model=model,
+                        data=data,
+                        activations=activations,
+                        real_labels=real_labels,
+                        random_labels=random_labels,
+                        method=method,
+                        run_seed=run_seed,
+                        run_dir=run_dir,
+                        tables=tables,
+                        hyperparameters=dict(settings),
+                    )
+
     def _tune_probe(
         self,
         *,
@@ -336,9 +668,7 @@ class FixedLayerSelectivityExperiment:
                 "task": "real",
                 "seed": self.config.seed,
                 **trial,
-                "hyperparameters": json.dumps(
-                    trial["hyperparameters"], sort_keys=True
-                ),
+                "hyperparameters": json.dumps(trial["hyperparameters"], sort_keys=True),
             }
             for trial in selected.tuning_trials
         )
@@ -367,9 +697,7 @@ class FixedLayerSelectivityExperiment:
             hyperparameters=hyperparameters,
             seed=run_seed,
             show_progress=self.config.progress.enabled,
-            progress_description=(
-                f"{model.name} {data.name} {method} real seed {run_seed}"
-            ),
+            progress_description=(f"{model.name} {data.name} {method} real seed {run_seed}"),
             progress_leave=self.config.progress.leave_completed,
         )
         random_probe = fit_selected_control_probe(
@@ -381,14 +709,10 @@ class FixedLayerSelectivityExperiment:
             hyperparameters=hyperparameters,
             seed=run_seed,
             training_epochs=(
-                int(real_probe.diagnostics["best_epoch"]) + 1
-                if method == "mlp1"
-                else None
+                int(real_probe.diagnostics["best_epoch"]) + 1 if method == "mlp1" else None
             ),
             show_progress=self.config.progress.enabled,
-            progress_description=(
-                f"{model.name} {data.name} {method} random seed {run_seed}"
-            ),
+            progress_description=(f"{model.name} {data.name} {method} random seed {run_seed}"),
             progress_leave=self.config.progress.leave_completed,
         )
         for task, probe, labels in (
@@ -547,9 +871,7 @@ class FixedLayerSelectivityExperiment:
                 seed=self.config.seed,
                 evaluation_batch_size=model.batch_size,
                 show_progress=self.config.progress.enabled,
-                progress_description=(
-                    f"{model.name} {data.name} DAS tune trial {index + 1}"
-                ),
+                progress_description=(f"{model.name} {data.name} DAS tune trial {index + 1}"),
                 progress_leave=self.config.progress.leave_completed,
             )
             for index, candidate in enumerate(candidates)
@@ -558,9 +880,7 @@ class FixedLayerSelectivityExperiment:
             range(len(fitted_candidates)),
             key=lambda index: (
                 fitted_candidates[index].validation.iia,
-                _finite_or_negative_infinity(
-                    fitted_candidates[index].validation.recovery
-                ),
+                _finite_or_negative_infinity(fitted_candidates[index].validation.recovery),
                 -candidates[index].epochs,
             ),
         )
@@ -586,9 +906,7 @@ class FixedLayerSelectivityExperiment:
                 "validation_sign_flip": fitted.validation.sign_flip_rate,
                 "selected": index == selected_index,
             }
-            for index, (candidate, fitted) in enumerate(
-                zip(candidates, fitted_candidates)
-            )
+            for index, (candidate, fitted) in enumerate(zip(candidates, fitted_candidates))
         )
         return candidates[selected_index]
 
@@ -618,9 +936,7 @@ class FixedLayerSelectivityExperiment:
             seed=run_seed,
             evaluation_batch_size=model.batch_size,
             show_progress=self.config.progress.enabled,
-            progress_description=(
-                f"{model.name} {data.name} DAS real seed {run_seed}"
-            ),
+            progress_description=(f"{model.name} {data.name} DAS real seed {run_seed}"),
             progress_leave=self.config.progress.leave_completed,
         )
         paired_epochs = int(real_fitted.fit_result.diagnostics["selected_epoch"]) + 1
@@ -635,9 +951,7 @@ class FixedLayerSelectivityExperiment:
             evaluation_batch_size=model.batch_size,
             fixed_epochs=paired_epochs,
             show_progress=self.config.progress.enabled,
-            progress_description=(
-                f"{model.name} {data.name} DAS random seed {run_seed}"
-            ),
+            progress_description=(f"{model.name} {data.name} DAS random seed {run_seed}"),
             progress_leave=self.config.progress.leave_completed,
         )
         for task, pairs, labels, fitted in (
@@ -651,9 +965,7 @@ class FixedLayerSelectivityExperiment:
                 scores = activations[role] @ direction
                 predictions = (scores >= threshold).astype(np.int64)
                 midpoint_accuracy = float((predictions == labels[role]).mean())
-                midpoint_balanced_accuracy = _balanced_accuracy(
-                    labels[role], predictions
-                )
+                midpoint_balanced_accuracy = _balanced_accuracy(labels[role], predictions)
                 evaluator = DirectionalPatchingEvaluator(
                     adapter,
                     list(pairs[role]),
@@ -728,9 +1040,7 @@ class FixedLayerSelectivityExperiment:
             np.savez_compressed(
                 checkpoint,
                 direction=direction,
-                diagnostics=np.asarray(
-                    json.dumps(fitted.fit_result.diagnostics, sort_keys=True)
-                ),
+                diagnostics=np.asarray(json.dumps(fitted.fit_result.diagnostics, sort_keys=True)),
             )
             tables["fit_metadata"].append(
                 {
@@ -741,9 +1051,7 @@ class FixedLayerSelectivityExperiment:
                     "task": task,
                     "seed": run_seed,
                     "hyperparameters": json.dumps(asdict(selected_config), sort_keys=True),
-                    "diagnostics": json.dumps(
-                        fitted.fit_result.diagnostics, sort_keys=True
-                    ),
+                    "diagnostics": json.dumps(fitted.fit_result.diagnostics, sort_keys=True),
                 }
             )
             tables["training_history"].extend(
@@ -830,11 +1138,7 @@ class FixedLayerSelectivityExperiment:
             ):
                 model, dataset, layer, method, split, metric_name = group
                 data = selected.selectivity.astype(float).to_numpy()
-                sem = (
-                    float(data.std(ddof=1) / np.sqrt(len(data)))
-                    if len(data) > 1
-                    else 0.0
-                )
+                sem = float(data.std(ddof=1) / np.sqrt(len(data))) if len(data) > 1 else 0.0
                 mean = float(data.mean())
                 records.append(
                     {
@@ -859,4 +1163,24 @@ def run_fixed_layer_selectivity(config: FixedLayerSelectivityConfig) -> Path:
     return FixedLayerSelectivityExperiment(config).run()
 
 
-__all__ = ["FixedLayerSelectivityExperiment", "run_fixed_layer_selectivity"]
+def tune_fixed_layer_selectivity(config: FixedLayerSelectivityConfig) -> Path:
+    """Run and persist validation-only tuning without starting final paired fits."""
+
+    return FixedLayerSelectivityExperiment(config).tune()
+
+
+def run_fixed_layer_selectivity_with_frozen_hyperparameters(
+    config: FixedLayerSelectivityConfig,
+    selections: Mapping[str, Mapping[str, Mapping[str, Any]]] | None = None,
+) -> Path:
+    """Run final paired fits using persisted or explicitly supplied selections."""
+
+    return FixedLayerSelectivityExperiment(config).run_selected(selections)
+
+
+__all__ = [
+    "FixedLayerSelectivityExperiment",
+    "run_fixed_layer_selectivity",
+    "run_fixed_layer_selectivity_with_frozen_hyperparameters",
+    "tune_fixed_layer_selectivity",
+]

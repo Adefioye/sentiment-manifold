@@ -110,6 +110,19 @@ def notebook(method: str, details: dict) -> dict:
     description = details["description"]
     settings = details["settings"]
     override = details["override"]
+    selection_example = {
+        "mean_diff": "# Mean difference has no hyperparameters to override.",
+        "logistic_regression": (
+            '# GPT2_SELECTIONS["gpt2-small"]["toy_movie_review"][METHOD]["c"] = 1.0'
+        ),
+        "das": (
+            '# GPT2_SELECTIONS["gpt2-small"]["toy_movie_review"][METHOD]["learning_rate"] = 0.001'
+        ),
+        "mlp1": ('# GPT2_SELECTIONS["gpt2-small"]["toy_movie_review"][METHOD]["hidden_size"] = 10'),
+    }[method]
+    qwen_selection_example = selection_example.replace("GPT2", "QWEN").replace(
+        '"gpt2-small"', '"qwen-0.6b"'
+    )
     settings_source = (
         dedent(
             f"""
@@ -121,7 +134,8 @@ def notebook(method: str, details: dict) -> dict:
             METHOD = "{method}"
             DEVICE = "cuda"
             DTYPE = "auto"
-            RUN_EXPERIMENT = True
+            RUN_TUNING = True
+            RUN_FINAL_TRAINING = True
             SHOW_PROGRESS = True
             HF_TOKEN_SOURCE = "prompt"  # "prompt" (hidden entry) or "colab_secret".
             """
@@ -143,9 +157,11 @@ def notebook(method: str, details: dict) -> dict:
             Every random-label seed is paired with a real-task run using the same optimization
             seed. Labels are permuted independently within train, validation, and test while
             preserving each split's class counts. Hyperparameters are selected on the real
-            validation split only; test data never affects selection. Result tables are written
-            only after both the real and paired random-label fits finish. Combined plots are
-            created only when all four methods and both models are present.
+            validation split only; test data never affects selection. Each model section first
+            finishes tuning, displays the trial table and tuning plot, and freezes the selection.
+            Paired real/random training starts in a separate cell. Final result tables are written
+            only after both paired tasks finish. Combined plots are created only when all four
+            methods and both models are present.
             """
         ),
         markdown(
@@ -228,12 +244,17 @@ def notebook(method: str, details: dict) -> dict:
                 importlib.import_module(module_name)
             required_apis = {
                 "sentiment_geometry.experiments.selectivity": {
-                    "FixedLayerSelectivityConfig", "run_fixed_layer_selectivity"
+                    "FixedLayerSelectivityConfig",
+                    "run_fixed_layer_selectivity_with_frozen_hyperparameters",
+                    "tune_fixed_layer_selectivity",
                 },
                 "sentiment_geometry.reporting": {
                     "combine_fixed_layer_selectivity_runs",
+                    "load_fixed_layer_hyperparameter_selections",
+                    "load_fixed_layer_tuning_trials",
                     "load_fixed_layer_selectivity_report",
                     "plot_fixed_layer_selectivity",
+                    "plot_fixed_layer_hyperparameter_tuning",
                     "plot_fixed_layer_run_diagnostics",
                 },
             }
@@ -316,11 +337,12 @@ def notebook(method: str, details: dict) -> dict:
         ),
         markdown(
             """
-            ## 4. Verify the protocol and define the reusable runner
+            ## 4. Verify the protocol and define the staged runners
 
             A trial list contains complete hand-chosen configurations, not a grid. There are no
-            more than three user-adjusted hyperparameters for this method. Each model run includes
-            both datasets and all paired real/random-label seeds before any result table is shown.
+            more than three user-adjusted hyperparameters for this method. The tuning runner stops
+            after validation-only selection and visualization. The final runner starts separately
+            and uses exactly the frozen settings shown between the two stages.
             """
         ),
         code(
@@ -330,12 +352,16 @@ def notebook(method: str, details: dict) -> dict:
 
             from sentiment_geometry.experiments.selectivity import (
                 FixedLayerSelectivityConfig,
-                run_fixed_layer_selectivity,
+                run_fixed_layer_selectivity_with_frozen_hyperparameters,
+                tune_fixed_layer_selectivity,
             )
             from sentiment_geometry.reporting import (
                 combine_fixed_layer_selectivity_runs,
+                load_fixed_layer_hyperparameter_selections,
+                load_fixed_layer_tuning_trials,
                 load_fixed_layer_selectivity_report,
                 plot_fixed_layer_selectivity,
+                plot_fixed_layer_hyperparameter_tuning,
                 plot_fixed_layer_run_diagnostics,
             )
 
@@ -375,24 +401,25 @@ def notebook(method: str, details: dict) -> dict:
                 config.validate(require_layers=True)
                 return config
 
-            def run_and_display(model_name):
+            def tuning_and_display(model_name):
                 config = configured_run(model_name)
                 run_dir = Path(config.output.output_dir) / config.output.run_id
-                if RUN_EXPERIMENT:
+                if RUN_TUNING:
                     token_env = config.data.hf_token_env
                     os.environ[token_env] = get_runtime_secret("HF_TOKEN")
                     try:
-                        run_dir = run_fixed_layer_selectivity(config)
+                        run_dir = tune_fixed_layer_selectivity(config)
                     finally:
                         release_hf_environment(token_env)
-                if not (run_dir / "metrics.csv").is_file():
-                    raise FileNotFoundError(f"No completed results at {{run_dir}}")
-
-                report = load_fixed_layer_selectivity_report(run_dir)
-                if not report.tuning_trials.empty:
+                selections = load_fixed_layer_hyperparameter_selections(run_dir)
+                try:
+                    trials = load_fixed_layer_tuning_trials(run_dir)
+                except FileNotFoundError:
+                    print("This method has no hyperparameter trials to compare.")
+                else:
                     display_table(
                         "Real-validation tuning trials (selected rows are marked):",
-                        report.tuning_trials,
+                        trials,
                         [
                             "dataset", "layer", "trial_index", "hyperparameters",
                             "validation_native_accuracy",
@@ -402,6 +429,29 @@ def notebook(method: str, details: dict) -> dict:
                             "validation_logit_flip", "validation_sign_flip", "selected",
                         ],
                     )
+                    tuning_figure = plot_fixed_layer_hyperparameter_tuning(run_dir)
+                    print("Validation-only tuning plot:", tuning_figure)
+                    display(Image(filename=str(tuning_figure)))
+                print("Frozen settings (inspect before starting final training):")
+                display(pd.json_normalize(selections, sep=" → ").T.rename(columns={{0: "value"}}))
+                return run_dir, selections
+
+            def final_training_and_display(model_name, selections):
+                config = configured_run(model_name)
+                run_dir = Path(config.output.output_dir) / config.output.run_id
+                if RUN_FINAL_TRAINING:
+                    token_env = config.data.hf_token_env
+                    os.environ[token_env] = get_runtime_secret("HF_TOKEN")
+                    try:
+                        run_dir = run_fixed_layer_selectivity_with_frozen_hyperparameters(
+                            config, selections
+                        )
+                    finally:
+                        release_hf_environment(token_env)
+                if not (run_dir / "metrics.csv").is_file():
+                    raise FileNotFoundError(f"No completed final results at {{run_dir}}")
+
+                report = load_fixed_layer_selectivity_report(run_dir)
 
                 metric_columns = [
                     "model", "dataset", "layer", "task", "split", "n_seeds",
@@ -474,18 +524,90 @@ def notebook(method: str, details: dict) -> dict:
                 return run_dir
             """
         ),
-        markdown("## 5. GPT-2 Small"),
-        code(
+        markdown(
             """
-            GPT2_RUN_DIR = run_and_display("gpt2-small")
-            print("GPT-2 artifacts:", GPT2_RUN_DIR)
+            ## 5. GPT-2 Small
+
+            ### 5a. Tune on real validation data and visualize every trial
+
+            This stage does not train either final real-label or random-label model.
             """
         ),
-        markdown("## 6. Qwen3-0.6B Base"),
         code(
             """
-            QWEN_RUN_DIR = run_and_display("qwen-0.6b")
-            print("Qwen artifacts:", QWEN_RUN_DIR)
+            GPT2_TUNING_DIR, GPT2_SELECTIONS = tuning_and_display("gpt2-small")
+            print("GPT-2 tuning artifacts:", GPT2_TUNING_DIR)
+            """
+        ),
+        markdown(
+            """
+            ### 5b. Inspect or deliberately override the frozen GPT-2 settings
+
+            The automatically selected values are already frozen in `GPT2_SELECTIONS`. If you
+            deliberately override one, edit the nested dictionary here before running 5c and
+            document the reason. Do not consult test performance when making that decision.
+            """
+        ),
+        code(
+            f"""
+            # Example only (leave commented for validation-selected settings):
+            {selection_example}
+            display(pd.json_normalize(GPT2_SELECTIONS, sep=" → ").T.rename(columns={{0: "value"}}))
+            """
+        ),
+        markdown(
+            """
+            ### 5c. Train paired real/random-label tasks with the frozen GPT-2 settings
+
+            Final metrics and diagnostic plots appear only after every paired seed finishes.
+            """
+        ),
+        code(
+            """
+            GPT2_RUN_DIR = final_training_and_display("gpt2-small", GPT2_SELECTIONS)
+            print("GPT-2 final artifacts:", GPT2_RUN_DIR)
+            """
+        ),
+        markdown(
+            """
+            ## 6. Qwen3-0.6B Base
+
+            ### 6a. Tune on real validation data and visualize every trial
+
+            This repeats the complete selection process independently for Qwen and both datasets.
+            """
+        ),
+        code(
+            """
+            QWEN_TUNING_DIR, QWEN_SELECTIONS = tuning_and_display("qwen-0.6b")
+            print("Qwen tuning artifacts:", QWEN_TUNING_DIR)
+            """
+        ),
+        markdown(
+            """
+            ### 6b. Inspect or deliberately override the frozen Qwen settings
+
+            Leave the dictionary unchanged for the automatic validation-selected workflow.
+            """
+        ),
+        code(
+            f"""
+            # Example only (leave commented for validation-selected settings):
+            {qwen_selection_example}
+            display(pd.json_normalize(QWEN_SELECTIONS, sep=" → ").T.rename(columns={{0: "value"}}))
+            """
+        ),
+        markdown(
+            """
+            ### 6c. Train paired real/random-label tasks with the frozen Qwen settings
+
+            Final metrics and diagnostic plots appear only after every paired seed finishes.
+            """
+        ),
+        code(
+            """
+            QWEN_RUN_DIR = final_training_and_display("qwen-0.6b", QWEN_SELECTIONS)
+            print("Qwen final artifacts:", QWEN_RUN_DIR)
             """
         ),
         markdown(

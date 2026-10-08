@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -43,6 +44,97 @@ class FixedLayerSelectivityReport:
     training_history: pd.DataFrame
 
 
+def load_fixed_layer_hyperparameter_selections(
+    run_dir: str | Path,
+) -> dict[str, dict[str, dict[str, Any]]]:
+    """Load the validation-selected settings persisted by the tuning stage."""
+
+    path = Path(run_dir) / "selected_hyperparameters.json"
+    if not path.is_file():
+        raise FileNotFoundError(f"No frozen hyperparameter selection at {path}")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise TypeError("Frozen hyperparameter selections must be a JSON object")
+    return payload
+
+
+def load_fixed_layer_tuning_trials(run_dir: str | Path) -> pd.DataFrame:
+    """Load validation-only hyperparameter trials before final training exists."""
+
+    trials = _read_optional_csv(Path(run_dir), "tuning_trials.csv")
+    if trials.empty:
+        raise FileNotFoundError(
+            f"No hyperparameter tuning trials at {Path(run_dir) / 'tuning_trials.csv'}"
+        )
+    return trials
+
+
+def _tuning_trial_label(row: pd.Series, varying_keys: list[str]) -> str:
+    parameters = json.loads(str(row["hyperparameters"]))
+    details = ", ".join(f"{key}={parameters[key]}" for key in varying_keys)
+    prefix = "* " if bool(row["selected"]) else ""
+    label = f"{prefix}Trial {int(row['trial_index']) + 1}"
+    return f"{label}\n{details}" if details else label
+
+
+def plot_fixed_layer_hyperparameter_tuning(run_dir: str | Path) -> Path:
+    """Plot each explicit trial against the validation metric used for selection."""
+
+    root = Path(run_dir)
+    trials = load_fixed_layer_tuning_trials(root).copy()
+    parameter_rows = [json.loads(value) for value in trials["hyperparameters"]]
+    parameter_keys = sorted({key for row in parameter_rows for key in row})
+    varying_keys = [
+        key
+        for key in parameter_keys
+        if len({json.dumps(row.get(key), sort_keys=True) for row in parameter_rows}) > 1
+    ]
+    trials["trial"] = [_tuning_trial_label(row, varying_keys) for _, row in trials.iterrows()]
+    method = str(trials["method"].iloc[0])
+    if method == "das":
+        metric_columns = {
+            "validation_native_accuracy": "IIA (selection metric)",
+            "validation_native_balanced_accuracy": "Balanced IIA",
+        }
+    else:
+        metric_columns = {
+            "validation_native_balanced_accuracy": "Native balanced accuracy (selection metric)",
+            "validation_midpoint_balanced_accuracy": "Midpoint balanced accuracy",
+        }
+    available = [
+        column for column in metric_columns if column in trials and trials[column].notna().any()
+    ]
+    plotted = trials.melt(
+        id_vars=["dataset", "trial"],
+        value_vars=available,
+        var_name="metric",
+        value_name="validation_score",
+    ).dropna(subset=["validation_score"])
+    plotted["metric"] = plotted["metric"].map(metric_columns)
+    sns.set_theme(style="whitegrid")
+    grid = sns.catplot(
+        data=plotted,
+        x="trial",
+        y="validation_score",
+        hue="metric",
+        col="dataset",
+        kind="point",
+        sharex=False,
+        height=4.0,
+        aspect=1.35,
+    )
+    grid.set(ylim=(0, 1))
+    grid.set_axis_labels("Explicit hyperparameter trial", "Validation score")
+    grid.set_xticklabels(rotation=20, ha="right")
+    grid.figure.suptitle("Validation-only hyperparameter tuning (* = frozen selection)", y=1.04)
+    figure_dir = root / "figures"
+    figure_dir.mkdir(parents=True, exist_ok=True)
+    path = figure_dir / "hyperparameter_tuning.png"
+    grid.figure.savefig(path, dpi=180, bbox_inches="tight")
+    plt.close(grid.figure)
+    return path
+
+
 def _read_optional_csv(root: Path, filename: str) -> pd.DataFrame:
     path = root / filename
     if not path.is_file() or path.stat().st_size == 0:
@@ -65,9 +157,7 @@ def _mean_std_summary(
     grouped = frame.groupby(keys, dropna=False)[available].agg(["mean", "std"])
     grouped.columns = [f"{metric}_{statistic}" for metric, statistic in grouped.columns]
     result = grouped.reset_index()
-    result["n_seeds"] = (
-        frame.groupby(keys, dropna=False)["seed"].nunique().to_numpy()
-    )
+    result["n_seeds"] = frame.groupby(keys, dropna=False)["seed"].nunique().to_numpy()
     std_columns = [column for column in result if column.endswith("_std")]
     result[std_columns] = result[std_columns].fillna(0.0)
     return result
@@ -92,17 +182,14 @@ def load_fixed_layer_selectivity_report(
             "prediction_agreement",
         ],
     )
-    training_memorization = performance[performance["split"] == "train"].reset_index(
-        drop=True
-    )
+    training_memorization = performance[performance["split"] == "train"].reset_index(drop=True)
 
     comparisons = metrics.copy()
     comparisons["accuracy_gap_midpoint_minus_native"] = (
         comparisons["midpoint_accuracy"] - comparisons["native_accuracy"]
     )
     comparisons["balanced_gap_midpoint_minus_native"] = (
-        comparisons["midpoint_balanced_accuracy"]
-        - comparisons["native_balanced_accuracy"]
+        comparisons["midpoint_balanced_accuracy"] - comparisons["native_balanced_accuracy"]
     )
     native_midpoint = _mean_std_summary(
         comparisons,
@@ -123,9 +210,7 @@ def load_fixed_layer_selectivity_report(
             {
                 **row,
                 "n_parameters": diagnostics.get("n_parameters"),
-                "best_epoch": diagnostics.get(
-                    "best_epoch", diagnostics.get("selected_epoch")
-                ),
+                "best_epoch": diagnostics.get("best_epoch", diagnostics.get("selected_epoch")),
                 "epochs_completed": len(
                     diagnostics.get("loss_history", diagnostics.get("history", []))
                 )
@@ -214,9 +299,7 @@ def plot_fixed_layer_run_diagnostics(run_dir: str | Path) -> tuple[Path, ...]:
     paths.append(path)
 
     selected = summary[
-        summary["metric"].isin(
-            ["native_balanced_accuracy", "midpoint_balanced_accuracy"]
-        )
+        summary["metric"].isin(["native_balanced_accuracy", "midpoint_balanced_accuracy"])
     ]
     grid = sns.catplot(
         data=selected,
@@ -309,20 +392,16 @@ def selectivity_run_directories(
 
     root = Path(run_root)
     directories = {
-        (method, model): root / "methods" / method / model
-        for method in methods
-        for model in models
+        (method, model): root / "methods" / method / model for method in methods for model in models
     }
     missing = [
         str(path)
         for path in directories.values()
-        if not (path / "metrics.csv").is_file()
-        or not (path / "selectivity_summary.csv").is_file()
+        if not (path / "metrics.csv").is_file() or not (path / "selectivity_summary.csv").is_file()
     ]
     if missing:
         raise FileNotFoundError(
-            "All method/model runs must finish before aggregation. Missing: "
-            + ", ".join(missing)
+            "All method/model runs must finish before aggregation. Missing: " + ", ".join(missing)
         )
     return directories
 
@@ -335,9 +414,7 @@ def combine_fixed_layer_selectivity_runs(
 ) -> Path:
     """Combine all completed method/model tables, then return the combined directory."""
 
-    directories = selectivity_run_directories(
-        run_root, methods=methods, models=models
-    )
+    directories = selectivity_run_directories(run_root, methods=methods, models=models)
     combined = Path(run_root) / "combined"
     store = RunArtifactStore(combined)
     for table in SELECTIVITY_TABLES:
@@ -356,11 +433,7 @@ def combine_fixed_layer_selectivity_runs(
             frame["source_model_run"] = model
             frames.append(frame)
         if frames:
-            rows = (
-                pd.concat(frames, ignore_index=True)
-                .drop_duplicates()
-                .to_dict(orient="records")
-            )
+            rows = pd.concat(frames, ignore_index=True).drop_duplicates().to_dict(orient="records")
             store.write_rows(f"{table}.csv", rows)
     return combined
 
@@ -454,7 +527,10 @@ __all__ = [
     "SELECTIVITY_METHODS",
     "SELECTIVITY_MODELS",
     "combine_fixed_layer_selectivity_runs",
+    "load_fixed_layer_hyperparameter_selections",
+    "load_fixed_layer_tuning_trials",
     "load_fixed_layer_selectivity_report",
+    "plot_fixed_layer_hyperparameter_tuning",
     "plot_fixed_layer_selectivity",
     "plot_fixed_layer_run_diagnostics",
     "selectivity_run_directories",

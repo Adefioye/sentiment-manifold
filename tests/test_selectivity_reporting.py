@@ -4,7 +4,10 @@ from pathlib import Path
 import pandas as pd
 
 from sentiment_geometry.reporting import (
+    load_fixed_layer_hyperparameter_selections,
+    load_fixed_layer_tuning_trials,
     load_fixed_layer_selectivity_report,
+    plot_fixed_layer_hyperparameter_tuning,
     plot_fixed_layer_run_diagnostics,
 )
 
@@ -88,9 +91,7 @@ def _write_synthetic_run(root: Path) -> None:
                 "task": task,
                 "seed": seed,
                 "hyperparameters": "{}",
-                "diagnostics": json.dumps(
-                    {"selected_epoch": 1, "best_train_loss": 0.2}
-                ),
+                "diagnostics": json.dumps({"selected_epoch": 1, "best_train_loss": 0.2}),
             }
             for task in ("real", "random")
             for seed in (11, 22)
@@ -123,10 +124,21 @@ def _write_synthetic_run(root: Path) -> None:
                 "dataset": "toy_movie_review",
                 "layer": 10,
                 "method": "das",
-                "selected": True,
+                "trial_index": trial,
+                "hyperparameters": json.dumps({"learning_rate": learning_rate, "epochs": 64}),
+                "validation_native_accuracy": 0.7 + 0.1 * trial,
+                "validation_native_balanced_accuracy": 0.68 + 0.1 * trial,
+                "selected": trial == 1,
             }
+            for trial, learning_rate in enumerate((0.0003, 0.001))
         ]
     ).to_csv(root / "tuning_trials.csv", index=False)
+    (root / "selected_hyperparameters.json").write_text(
+        json.dumps(
+            {"gpt2-small": {"toy_movie_review": {"das": {"learning_rate": 0.001, "epochs": 64}}}}
+        ),
+        encoding="utf-8",
+    )
 
 
 def test_selectivity_report_surfaces_essential_tables_and_plots(tmp_path):
@@ -144,3 +156,16 @@ def test_selectivity_report_surfaces_essential_tables_and_plots(tmp_path):
 
     assert len(paths) == 4
     assert all(path.is_file() and path.stat().st_size > 0 for path in paths)
+
+
+def test_tuning_report_is_available_before_final_metrics(tmp_path):
+    _write_synthetic_run(tmp_path)
+    (tmp_path / "metrics.csv").unlink()
+
+    trials = load_fixed_layer_tuning_trials(tmp_path)
+    selections = load_fixed_layer_hyperparameter_selections(tmp_path)
+    figure = plot_fixed_layer_hyperparameter_tuning(tmp_path)
+
+    assert len(trials) == 2
+    assert selections["gpt2-small"]["toy_movie_review"]["das"]["learning_rate"] == 0.001
+    assert figure.is_file() and figure.stat().st_size > 0

@@ -8,9 +8,11 @@ import torch
 
 from sentiment_geometry.datasets import TextExample
 from sentiment_geometry.experiments.selectivity import (
+    DASSelectivityConfig,
     FixedLayerSelectivityConfig,
     run_fixed_layer_selectivity,
     run_fixed_layer_selectivity_with_frozen_hyperparameters,
+    tune_fixed_layer_das_epoch_budgets,
     tune_fixed_layer_selectivity,
 )
 from sentiment_geometry.experiments.selectivity import experiment as selectivity_experiment
@@ -299,3 +301,89 @@ def test_tuning_stage_persists_selection_without_final_metrics(tmp_path, monkeyp
     assert selections == {"gpt2-small": {"toy_movie_review": {"mean_diff": {}}}}
     assert (run_dir / "tuning_trials.csv").is_file()
     assert not (run_dir / "metrics.csv").exists()
+
+
+def test_das_epoch_tuning_preserves_learning_rate_artifacts(tmp_path, monkeypatch):
+    device = torch.device("cpu")
+    adapter = SimpleNamespace(
+        device_spec=SimpleNamespace(device=device),
+        n_layers=12,
+        provenance=lambda: {"revision": "test"},
+    )
+    config = FixedLayerSelectivityConfig(
+        models=[FixedLayerModelConfig(name="gpt2-small", layer=10)],
+        methods=["das"],
+        data=SelectivityDataConfig(datasets=["toy_movie_review", "full_ait"]),
+        output=SelectivityOutputConfig(
+            output_dir=str(tmp_path), run_id="staged", cache_activations=True
+        ),
+        progress=SelectivityProgressConfig(enabled=False),
+    )
+    base = {
+        "gpt2-small": {
+            "toy_movie_review": {
+                "das": {
+                    **DASSelectivityConfig(learning_rate=0.003).__dict__,
+                    "trials": [],
+                }
+            },
+            "full_ait": {
+                "das": {
+                    **DASSelectivityConfig(learning_rate=0.001).__dict__,
+                    "trials": [],
+                }
+            },
+        }
+    }
+    run_dir = tmp_path / "staged"
+    run_dir.mkdir()
+    original_trials = "original learning-rate trials\n"
+    (run_dir / "tuning_trials.csv").write_text(original_trials)
+    (run_dir / "selected_hyperparameters.json").write_text(json.dumps(base))
+
+    monkeypatch.setattr(
+        selectivity_experiment.CausalLMAdapter,
+        "from_pretrained",
+        staticmethod(lambda *args, **kwargs: adapter),
+    )
+    monkeypatch.setattr(
+        selectivity_experiment.FixedLayerSelectivityExperiment,
+        "_prepare_data",
+        lambda self, dataset_name, *args: SimpleNamespace(name=dataset_name),
+    )
+
+    observed = {}
+
+    def fake_tune_das(*, data, tables, candidates, table_name, **kwargs):
+        expected_lr = 0.003 if data.name == "toy_movie_review" else 0.001
+        assert [candidate.epochs for candidate in candidates] == [32, 64, 96, 128, 160]
+        assert {candidate.learning_rate for candidate in candidates} == {expected_lr}
+        selected_index = 2 if data.name == "toy_movie_review" else 3
+        for index, candidate in enumerate(candidates):
+            tables[table_name].append(
+                {
+                    "dataset": data.name,
+                    "trial_index": index,
+                    "hyperparameters": json.dumps(candidate.__dict__),
+                    "selected": index == selected_index,
+                }
+            )
+        observed[data.name] = True
+        return candidates[selected_index]
+
+    monkeypatch.setattr(
+        selectivity_experiment.FixedLayerSelectivityExperiment,
+        "_tune_das",
+        staticmethod(fake_tune_das),
+    )
+
+    result = tune_fixed_layer_das_epoch_budgets(config, base, [32, 64, 96, 128, 160])
+    selected = json.loads((result / "das_epoch_selected_hyperparameters.json").read_text())
+
+    assert observed == {"toy_movie_review": True, "full_ait": True}
+    assert selected["gpt2-small"]["toy_movie_review"]["das"]["learning_rate"] == 0.003
+    assert selected["gpt2-small"]["toy_movie_review"]["das"]["epochs"] == 96
+    assert selected["gpt2-small"]["full_ait"]["das"]["learning_rate"] == 0.001
+    assert selected["gpt2-small"]["full_ait"]["das"]["epochs"] == 128
+    assert (result / "tuning_trials.csv").read_text() == original_trials
+    assert json.loads((result / "selected_hyperparameters.json").read_text()) == base

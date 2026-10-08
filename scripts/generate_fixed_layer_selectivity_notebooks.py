@@ -48,16 +48,15 @@ METHODS = {
         "filename": "colab_fixed_layer_das_selectivity",
         "description": (
             "Ten explicit DAS trials vary only learning rate across two orders of magnitude. "
-            "Weight decay and the epoch budget stay fixed, while validation IIA remains the "
-            "primary selection metric."
+            "A second five-trial sweep then varies only the epoch budget at each dataset's "
+            "selected learning rate. Validation IIA remains the primary selection metric."
         ),
         "tuning_note": (
-            "**Epoch-budget note.** The initial sweep holds every trial at 64 epochs so learning "
-            "rate is the only changing factor. After tuning, inspect `best_epoch` and "
-            "`best_epoch_near_budget`. If strong candidates select checkpoints near the 64-epoch "
-            "limit, start a new `RUN_ID` and increase the epoch budget for every learning-rate "
-            "trial equally (for example, to 96 or 128). Never decide this from test metrics or "
-            "increase the budget for only the winning learning rate."
+            "**Two-stage tuning note.** The first sweep holds every trial at 64 epochs so learning "
+            "rate is the only changing factor. The next section freezes the separately selected "
+            "ToyMovieReview and full-AIT learning rates, then compares epoch budgets of 32, 64, "
+            "96, 128, and 160 using validation IIA only. The original learning-rate artifacts are "
+            "preserved."
         ),
         "settings": dedent(
             """
@@ -140,6 +139,19 @@ def notebook(method: str, details: dict) -> dict:
     qwen_selection_example = selection_example.replace("GPT2", "QWEN").replace(
         '"gpt2-small"', '"qwen-0.6b"'
     )
+    das_settings = ""
+    if method == "das":
+        das_settings = dedent(
+            """
+            # GPT-2 learning-rate tuning is already complete on Drive. Keep this False.
+            RUN_LEARNING_RATE_TUNING = {
+                "gpt2-small": False,
+                "qwen-0.6b": True,
+            }
+            RUN_DAS_EPOCH_TUNING = True
+            DAS_EPOCH_BUDGETS = [32, 64, 96, 128, 160]
+            """
+        ).strip()
     settings_source = (
         dedent(
             f"""
@@ -159,7 +171,67 @@ def notebook(method: str, details: dict) -> dict:
         ).strip()
         + "\n\n"
         + settings
+        + (("\n\n" + das_settings) if das_settings else "")
     )
+    gpt2_tuning_call = 'tuning_and_display("gpt2-small")'
+    qwen_tuning_call = 'tuning_and_display("qwen-0.6b")'
+    gpt2_epoch_cells: list[dict] = []
+    qwen_epoch_cells: list[dict] = []
+    gpt2_inspect_number = "5b"
+    gpt2_training_number = "5c"
+    qwen_inspect_number = "6b"
+    qwen_training_number = "6c"
+    if method == "das":
+        gpt2_tuning_call = (
+            'tuning_and_display("gpt2-small", run_tuning=RUN_LEARNING_RATE_TUNING["gpt2-small"])'
+        )
+        qwen_tuning_call = (
+            'tuning_and_display("qwen-0.6b", run_tuning=RUN_LEARNING_RATE_TUNING["qwen-0.6b"])'
+        )
+        gpt2_inspect_number = "5c"
+        gpt2_training_number = "5d"
+        qwen_inspect_number = "6c"
+        qwen_training_number = "6d"
+        gpt2_epoch_cells = [
+            markdown(
+                """
+                ### 5b. Tune the epoch budget at GPT-2's selected learning rates
+
+                This stage does **not** rerun the completed learning-rate sweep. It loads the
+                saved, dataset-specific learning rates and varies only the epoch budget over
+                `32, 64, 96, 128, 160`. Selection remains validation-only. Results are saved after
+                each dataset in separate `das_epoch_*` artifacts, so the original learning-rate
+                trials remain intact.
+                """
+            ),
+            code(
+                """
+                GPT2_EPOCH_TUNING_DIR, GPT2_SELECTIONS = das_epoch_tuning_and_display(
+                    "gpt2-small", GPT2_SELECTIONS
+                )
+                print("GPT-2 epoch-tuning artifacts:", GPT2_EPOCH_TUNING_DIR)
+                """
+            ),
+        ]
+        qwen_epoch_cells = [
+            markdown(
+                """
+                ### 6b. Tune the epoch budget at Qwen's selected learning rates
+
+                Run this after Qwen's learning-rate sweep finishes. It freezes the separately
+                selected ToyMovieReview and full-AIT learning rates and varies only the epoch
+                budget over `32, 64, 96, 128, 160`, using validation IIA for selection.
+                """
+            ),
+            code(
+                """
+                QWEN_EPOCH_TUNING_DIR, QWEN_SELECTIONS = das_epoch_tuning_and_display(
+                    "qwen-0.6b", QWEN_SELECTIONS
+                )
+                print("Qwen epoch-tuning artifacts:", QWEN_EPOCH_TUNING_DIR)
+                """
+            ),
+        ]
     cells = [
         markdown(
             f"""
@@ -263,14 +335,18 @@ def notebook(method: str, details: dict) -> dict:
                 "sentiment_geometry.experiments.selectivity": {
                     "FixedLayerSelectivityConfig",
                     "run_fixed_layer_selectivity_with_frozen_hyperparameters",
+                    "tune_fixed_layer_das_epoch_budgets",
                     "tune_fixed_layer_selectivity",
                 },
                 "sentiment_geometry.reporting": {
                     "combine_fixed_layer_selectivity_runs",
+                    "load_fixed_layer_das_epoch_selections",
+                    "load_fixed_layer_das_epoch_tuning_trials",
                     "load_fixed_layer_hyperparameter_selections",
                     "load_fixed_layer_tuning_trials",
                     "load_fixed_layer_selectivity_report",
                     "plot_fixed_layer_selectivity",
+                    "plot_fixed_layer_das_epoch_tuning",
                     "plot_fixed_layer_hyperparameter_tuning",
                     "plot_fixed_layer_run_diagnostics",
                 },
@@ -370,14 +446,18 @@ def notebook(method: str, details: dict) -> dict:
             from sentiment_geometry.experiments.selectivity import (
                 FixedLayerSelectivityConfig,
                 run_fixed_layer_selectivity_with_frozen_hyperparameters,
+                tune_fixed_layer_das_epoch_budgets,
                 tune_fixed_layer_selectivity,
             )
             from sentiment_geometry.reporting import (
                 combine_fixed_layer_selectivity_runs,
+                load_fixed_layer_das_epoch_selections,
+                load_fixed_layer_das_epoch_tuning_trials,
                 load_fixed_layer_hyperparameter_selections,
                 load_fixed_layer_tuning_trials,
                 load_fixed_layer_selectivity_report,
                 plot_fixed_layer_selectivity,
+                plot_fixed_layer_das_epoch_tuning,
                 plot_fixed_layer_hyperparameter_tuning,
                 plot_fixed_layer_run_diagnostics,
             )
@@ -418,10 +498,10 @@ def notebook(method: str, details: dict) -> dict:
                 config.validate(require_layers=True)
                 return config
 
-            def tuning_and_display(model_name):
+            def tuning_and_display(model_name, run_tuning=RUN_TUNING):
                 config = configured_run(model_name)
                 run_dir = Path(config.output.output_dir) / config.output.run_id
-                if RUN_TUNING:
+                if run_tuning:
                     token_env = config.data.hf_token_env
                     os.environ[token_env] = get_runtime_secret("HF_TOKEN")
                     try:
@@ -451,6 +531,43 @@ def notebook(method: str, details: dict) -> dict:
                     print("Validation-only tuning plot:", tuning_figure)
                     display(Image(filename=str(tuning_figure)))
                 print("Frozen settings (inspect before starting final training):")
+                display(pd.json_normalize(selections, sep=" → ").T.rename(columns={{0: "value"}}))
+                return run_dir, selections
+
+            def das_epoch_tuning_and_display(model_name, learning_rate_selections):
+                if METHOD != "das":
+                    raise ValueError("Epoch-budget tuning is only defined for DAS.")
+                config = configured_run(model_name)
+                run_dir = Path(config.output.output_dir) / config.output.run_id
+                if RUN_DAS_EPOCH_TUNING:
+                    token_env = config.data.hf_token_env
+                    os.environ[token_env] = get_runtime_secret("HF_TOKEN")
+                    try:
+                        run_dir = tune_fixed_layer_das_epoch_budgets(
+                            config,
+                            learning_rate_selections,
+                            DAS_EPOCH_BUDGETS,
+                        )
+                    finally:
+                        release_hf_environment(token_env)
+                selections = load_fixed_layer_das_epoch_selections(run_dir)
+                trials = load_fixed_layer_das_epoch_tuning_trials(run_dir)
+                display_table(
+                    "Validation-only epoch-budget trials (selected rows are marked):",
+                    trials,
+                    [
+                        "dataset", "layer", "trial_index", "hyperparameters",
+                        "validation_native_accuracy",
+                        "validation_native_balanced_accuracy",
+                        "validation_loss", "validation_recovery",
+                        "validation_logit_flip", "validation_sign_flip", "selected",
+                        "best_epoch", "epoch_budget", "best_epoch_near_budget",
+                    ],
+                )
+                figure = plot_fixed_layer_das_epoch_tuning(run_dir)
+                print("Validation-only DAS epoch-budget plot:", figure)
+                display(Image(filename=str(figure)))
+                print("Frozen learning-rate plus epoch selections:")
                 display(pd.json_normalize(selections, sep=" → ").T.rename(columns={{0: "value"}}))
                 return run_dir, selections
 
@@ -554,17 +671,18 @@ def notebook(method: str, details: dict) -> dict:
             """
         ),
         code(
-            """
-            GPT2_TUNING_DIR, GPT2_SELECTIONS = tuning_and_display("gpt2-small")
+            f"""
+            GPT2_TUNING_DIR, GPT2_SELECTIONS = {gpt2_tuning_call}
             print("GPT-2 tuning artifacts:", GPT2_TUNING_DIR)
             """
         ),
+        *gpt2_epoch_cells,
         markdown(
-            """
-            ### 5b. Inspect or deliberately override the frozen GPT-2 settings
+            f"""
+            ### {gpt2_inspect_number}. Inspect or deliberately override the frozen GPT-2 settings
 
             The automatically selected values are already frozen in `GPT2_SELECTIONS`. If you
-            deliberately override one, edit the nested dictionary here before running 5c and
+            deliberately override one, edit the nested dictionary here before final training and
             document the reason. Do not consult test performance when making that decision.
             """
         ),
@@ -576,8 +694,8 @@ def notebook(method: str, details: dict) -> dict:
             """
         ),
         markdown(
-            """
-            ### 5c. Train paired real/random-label tasks with the frozen GPT-2 settings
+            f"""
+            ### {gpt2_training_number}. Train paired real/random-label tasks with the frozen GPT-2 settings
 
             Final metrics and diagnostic plots appear only after every paired seed finishes.
             """
@@ -600,14 +718,15 @@ def notebook(method: str, details: dict) -> dict:
             """
         ),
         code(
-            """
-            QWEN_TUNING_DIR, QWEN_SELECTIONS = tuning_and_display("qwen-0.6b")
+            f"""
+            QWEN_TUNING_DIR, QWEN_SELECTIONS = {qwen_tuning_call}
             print("Qwen tuning artifacts:", QWEN_TUNING_DIR)
             """
         ),
+        *qwen_epoch_cells,
         markdown(
-            """
-            ### 6b. Inspect or deliberately override the frozen Qwen settings
+            f"""
+            ### {qwen_inspect_number}. Inspect or deliberately override the frozen Qwen settings
 
             Leave the dictionary unchanged for the automatic validation-selected workflow.
             """
@@ -620,8 +739,8 @@ def notebook(method: str, details: dict) -> dict:
             """
         ),
         markdown(
-            """
-            ### 6c. Train paired real/random-label tasks with the frozen Qwen settings
+            f"""
+            ### {qwen_training_number}. Train paired real/random-label tasks with the frozen Qwen settings
 
             Final metrics and diagnostic plots appear only after every paired seed finishes.
             """

@@ -6,6 +6,7 @@ import json
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
+from collections.abc import Sequence
 from typing import Any, Mapping
 
 import numpy as np
@@ -261,6 +262,90 @@ class FixedLayerSelectivityExperiment:
                 store.write_rows(f"{filename}.csv", rows)
         store.write_rows("runtime.csv", runtime_rows)
         store.write_rows("selectivity_summary.csv", self._selectivity_summary(tables["metrics"]))
+        return run_dir
+
+    def tune_das_epoch_budgets(
+        self,
+        learning_rate_selections: Mapping[str, Mapping[str, Mapping[str, Any]]],
+        epoch_budgets: Sequence[int],
+    ) -> Path:
+        """Tune DAS epoch budgets without overwriting learning-rate tuning artifacts."""
+
+        if self.config.methods != ["das"]:
+            raise ValueError("DAS epoch-budget tuning requires config.methods == ['das']")
+        self._validate_selections(learning_rate_selections)
+        budgets = tuple(int(value) for value in epoch_budgets)
+        if not budgets or any(value < 1 for value in budgets):
+            raise ValueError("DAS epoch budgets must be positive integers")
+        if len(set(budgets)) != len(budgets):
+            raise ValueError("DAS epoch budgets must be unique")
+
+        run_dir = self._run_directory(require_run_id=True)
+        store = RunArtifactStore(run_dir)
+        store.write_json(
+            "das_epoch_tuning_config.json",
+            {"epoch_budgets": list(budgets), "selection_metric": "validation_iia"},
+        )
+        selections = json.loads(json.dumps(learning_rate_selections))
+        trial_rows: list[dict[str, Any]] = []
+        runtime_rows: list[dict[str, Any]] = []
+        models = tqdm(
+            self.config.models,
+            desc="DAS epoch-budget tuning models",
+            leave=True,
+            disable=not self.config.progress.enabled,
+            unit="model",
+        )
+        for model in models:
+            models.set_postfix(model=model.name)
+            adapter = CausalLMAdapter.from_pretrained(
+                model.hub_name,
+                resolve_device(model.device, model.dtype),
+                revision=model.revision,
+                prepend_bos=model.prepend_bos,
+            )
+            try:
+                for dataset_name in tqdm(
+                    self.config.data.datasets,
+                    desc=f"{model.name} DAS epoch datasets",
+                    leave=self.config.progress.leave_completed,
+                    disable=not self.config.progress.enabled,
+                    unit="dataset",
+                ):
+                    dataset_model = self._validated_dataset_model(model, dataset_name, adapter)
+                    data = self._prepare_data(dataset_name, dataset_model, adapter)
+                    base_settings = dict(learning_rate_selections[model.name][data.name]["das"])
+                    base_config = DASSelectivityConfig(**base_settings)
+                    candidates = tuple(
+                        replace(base_config, epochs=budget, trials=[]) for budget in budgets
+                    )
+                    selected = self._tune_das(
+                        model=dataset_model,
+                        adapter=adapter,
+                        data=data,
+                        tables={"das_epoch_tuning_trials": trial_rows},
+                        candidates=candidates,
+                        table_name="das_epoch_tuning_trials",
+                        progress_stage="DAS epoch tune",
+                    )
+                    selections[model.name][data.name]["das"] = asdict(selected)
+                    runtime_rows.append(
+                        {
+                            "phase": "das_epoch_tuning",
+                            "model": model.name,
+                            "dataset": dataset_name,
+                            "layer": dataset_model.layer,
+                            **adapter.provenance(),
+                        }
+                    )
+                    # Persist after each dataset so a completed dataset survives a later failure.
+                    store.write_rows("das_epoch_tuning_trials.csv", trial_rows)
+                    store.write_rows("das_epoch_tuning_runtime.csv", runtime_rows)
+                    store.write_json("das_epoch_selected_hyperparameters.json", selections)
+            finally:
+                adapter_device = adapter.device_spec.device
+                del adapter
+                clear_device_cache(adapter_device)
         return run_dir
 
     def _validated_dataset_model(
@@ -857,9 +942,12 @@ class FixedLayerSelectivityExperiment:
         adapter: CausalLMAdapter,
         data: PreparedSelectivityData,
         tables: dict[str, list[dict[str, Any]]],
+        candidates: Sequence[DASSelectivityConfig] | None = None,
+        table_name: str = "tuning_trials",
+        progress_stage: str = "DAS tune",
     ) -> DASSelectivityConfig:
         assert model.layer is not None
-        candidates = self.config.das.candidates()
+        candidates = tuple(candidates or self.config.das.candidates())
         fitted_candidates = [
             fit_final_token_das(
                 adapter,
@@ -871,7 +959,9 @@ class FixedLayerSelectivityExperiment:
                 seed=self.config.seed,
                 evaluation_batch_size=model.batch_size,
                 show_progress=self.config.progress.enabled,
-                progress_description=(f"{model.name} {data.name} DAS tune trial {index + 1}"),
+                progress_description=(
+                    f"{model.name} {data.name} {progress_stage} trial {index + 1}"
+                ),
                 progress_leave=self.config.progress.leave_completed,
             )
             for index, candidate in enumerate(candidates)
@@ -884,7 +974,7 @@ class FixedLayerSelectivityExperiment:
                 -candidates[index].epochs,
             ),
         )
-        tables["tuning_trials"].extend(
+        tables[table_name].extend(
             {
                 "model": model.name,
                 "dataset": data.name,
@@ -1175,6 +1265,18 @@ def tune_fixed_layer_selectivity(config: FixedLayerSelectivityConfig) -> Path:
     return FixedLayerSelectivityExperiment(config).tune()
 
 
+def tune_fixed_layer_das_epoch_budgets(
+    config: FixedLayerSelectivityConfig,
+    learning_rate_selections: Mapping[str, Mapping[str, Mapping[str, Any]]],
+    epoch_budgets: Sequence[int],
+) -> Path:
+    """Tune epoch budgets at each dataset's validation-selected DAS learning rate."""
+
+    return FixedLayerSelectivityExperiment(config).tune_das_epoch_budgets(
+        learning_rate_selections, epoch_budgets
+    )
+
+
 def run_fixed_layer_selectivity_with_frozen_hyperparameters(
     config: FixedLayerSelectivityConfig,
     selections: Mapping[str, Mapping[str, Mapping[str, Any]]] | None = None,
@@ -1188,5 +1290,6 @@ __all__ = [
     "FixedLayerSelectivityExperiment",
     "run_fixed_layer_selectivity",
     "run_fixed_layer_selectivity_with_frozen_hyperparameters",
+    "tune_fixed_layer_das_epoch_budgets",
     "tune_fixed_layer_selectivity",
 ]

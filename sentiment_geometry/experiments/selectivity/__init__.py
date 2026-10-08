@@ -15,6 +15,7 @@ from .experiment import (
     FixedLayerSelectivityExperiment,
     run_fixed_layer_selectivity,
     run_fixed_layer_selectivity_with_frozen_hyperparameters,
+    tune_fixed_layer_das_epoch_budgets,
     tune_fixed_layer_selectivity,
 )
 
@@ -31,5 +32,6 @@ __all__ = [
     "SelectivityProgressConfig",
     "run_fixed_layer_selectivity",
     "run_fixed_layer_selectivity_with_frozen_hyperparameters",
+    "tune_fixed_layer_das_epoch_budgets",
     "tune_fixed_layer_selectivity",
 ]

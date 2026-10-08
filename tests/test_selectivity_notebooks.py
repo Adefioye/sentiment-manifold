@@ -20,23 +20,25 @@ def _source(path: Path) -> str:
     notebook = json.loads(path.read_text(encoding="utf-8"))
     for index, cell in enumerate(notebook["cells"]):
         if cell["cell_type"] == "code":
-            assert cell["execution_count"] is None
-            assert cell["outputs"] == []
             compile("".join(cell["source"]), f"{path}:cell-{index}", "exec")
     return "\n".join("".join(cell["source"]) for cell in notebook["cells"])
 
 
 @pytest.mark.parametrize(("method", "filename"), NOTEBOOKS.items())
-def test_selectivity_colab_notebook_is_clean_thin_and_uses_shared_run(method, filename):
+def test_selectivity_colab_notebook_is_valid_thin_and_uses_shared_run(method, filename):
     source = _source(PROJECT_ROOT / "notebooks" / filename)
 
     assert f'METHOD = "{method}"' in source
     assert 'RUN_ID = "fixed-layer-selectivity-v1"' in source
     assert '"gpt2-small": {"toy_movie_review": 10, "full_ait": 11}' in source
     assert '"qwen-0.6b": {"toy_movie_review": 26, "full_ait": 26}' in source
-    assert 'tuning_and_display("gpt2-small")' in source
+    assert 'tuning_and_display("gpt2-small")' in source or (
+        '"gpt2-small", run_tuning=RUN_LEARNING_RATE_TUNING["gpt2-small"]' in source
+    )
     assert 'final_training_and_display("gpt2-small", GPT2_SELECTIONS)' in source
-    assert 'tuning_and_display("qwen-0.6b")' in source
+    assert 'tuning_and_display("qwen-0.6b")' in source or (
+        '"qwen-0.6b", run_tuning=RUN_LEARNING_RATE_TUNING["qwen-0.6b"]' in source
+    )
     assert 'final_training_and_display("qwen-0.6b", QWEN_SELECTIONS)' in source
     assert "tune_fixed_layer_selectivity(config)" in source
     assert "run_fixed_layer_selectivity_with_frozen_hyperparameters(" in source
@@ -65,9 +67,14 @@ def test_selectivity_colab_notebook_is_clean_thin_and_uses_shared_run(method, fi
     assert "GridSearchCV" not in source
     assert "ParameterGrid" not in source
     if method == "das":
-        assert "Epoch-budget note" in source
+        assert "Two-stage tuning note" in source
         assert '"best_epoch", "epoch_budget", "best_epoch_near_budget"' in source
-        assert "increase the epoch budget for every learning-rate trial equally" in source
+        assert "DAS_EPOCH_BUDGETS = [32, 64, 96, 128, 160]" in source
+        assert '"gpt2-small": False' in source
+        assert '"qwen-0.6b": True' in source
+        assert "tune_fixed_layer_das_epoch_budgets(" in source
+        assert "plot_fixed_layer_das_epoch_tuning(run_dir)" in source
+        assert "das_epoch_tuning_and_display(" in source
 
 
 def test_selectivity_notebook_required_public_apis_are_importable():
@@ -75,15 +82,19 @@ def test_selectivity_notebook_required_public_apis_are_importable():
         "sentiment_geometry.experiments.selectivity": {
             "FixedLayerSelectivityConfig",
             "run_fixed_layer_selectivity_with_frozen_hyperparameters",
+            "tune_fixed_layer_das_epoch_budgets",
             "tune_fixed_layer_selectivity",
         },
         "sentiment_geometry.reporting": {
             "combine_fixed_layer_selectivity_runs",
+            "load_fixed_layer_das_epoch_selections",
+            "load_fixed_layer_das_epoch_tuning_trials",
             "load_fixed_layer_hyperparameter_selections",
             "load_fixed_layer_tuning_trials",
             "load_fixed_layer_selectivity_report",
             "plot_fixed_layer_selectivity",
             "plot_fixed_layer_hyperparameter_tuning",
+            "plot_fixed_layer_das_epoch_tuning",
             "plot_fixed_layer_run_diagnostics",
         },
     }

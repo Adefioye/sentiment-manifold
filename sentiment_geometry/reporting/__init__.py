@@ -20,6 +20,7 @@ from .sentiment_position import (
 )
 from .selectivity import (
     FixedLayerSelectivityReport,
+    build_fixed_layer_selectivity_accuracy_tables,
     combine_fixed_layer_selectivity_runs,
     load_fixed_layer_das_epoch_selections,
     load_fixed_layer_das_epoch_tuning_trials,
@@ -33,6 +34,8 @@ from .selectivity import (
     plot_fixed_layer_das_epoch_tuning,
     plot_fixed_layer_selectivity,
     plot_fixed_layer_run_diagnostics,
+    plot_fixed_layer_selectivity_accuracy_gaps,
+    save_fixed_layer_selectivity_accuracy_tables,
     selectivity_run_directories,
 )
 from .table1 import (
@@ -47,6 +50,7 @@ __all__ = [
     "AITValenceReportData",
     "SentimentPositionReportData",
     "FixedLayerSelectivityReport",
+    "build_fixed_layer_selectivity_accuracy_tables",
     "load_ait_valence_report_data",
     "plot_ait_valence_run",
     "plot_cosine_similarity_grid",
@@ -67,6 +71,8 @@ __all__ = [
     "plot_fixed_layer_mlp1_hidden_tuning",
     "plot_fixed_layer_das_epoch_tuning",
     "plot_fixed_layer_run_diagnostics",
+    "plot_fixed_layer_selectivity_accuracy_gaps",
+    "save_fixed_layer_selectivity_accuracy_tables",
     "selectivity_run_directories",
     "select_table1_best_layers",
     "selected_layer_table",

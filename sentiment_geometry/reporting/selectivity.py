@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -10,11 +11,22 @@ from typing import Any
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
+from matplotlib.lines import Line2D
 
 from ..persistence import RunArtifactStore
 
 SELECTIVITY_METHODS = ("mean_diff", "logistic_regression", "das", "mlp1")
 SELECTIVITY_MODELS = ("gpt2-small", "qwen-0.6b")
+SELECTIVITY_METHOD_LABELS = {
+    "mean_diff": "Mean difference",
+    "logistic_regression": "Logistic regression",
+    "das": "DAS",
+    "mlp1": "MLP-1",
+}
+SELECTIVITY_DATASET_LABELS = {
+    "toy_movie_review": "ToyMovieReview",
+    "full_ait": "Full AIT",
+}
 SELECTIVITY_TABLES = (
     "metrics",
     "predictions",
@@ -597,6 +609,229 @@ def combine_fixed_layer_selectivity_runs(
     return combined
 
 
+def _paired_accuracy_summary(
+    metrics: pd.DataFrame,
+    *,
+    split: str,
+    metric: str,
+    column_prefix: str,
+) -> pd.DataFrame:
+    keys = ["model", "dataset", "layer", "method", "split", "seed"]
+    selected = metrics.loc[
+        (metrics["split"] == split) & metrics["task"].isin(["real", "random"]),
+        [*keys, "task", metric],
+    ].dropna(subset=[metric])
+    duplicate_keys = [*keys, "task"]
+    if selected.duplicated(duplicate_keys).any():
+        raise ValueError(f"Duplicate paired accuracy rows found for {metric}/{split}")
+    paired = selected.pivot(index=keys, columns="task", values=metric).reset_index()
+    if not {"real", "random"}.issubset(paired.columns):
+        raise ValueError(f"Both real and random rows are required for {metric}/{split}")
+    paired = paired.dropna(subset=["real", "random"])
+    if paired.empty:
+        raise ValueError(f"No complete real/random pairs found for {metric}/{split}")
+    paired["selectivity"] = paired["real"] - paired["random"]
+
+    group_keys = ["model", "dataset", "layer", "method", "split"]
+    summary = (
+        paired.groupby(group_keys, dropna=False)
+        .agg(
+            real_mean=("real", "mean"),
+            real_std=("real", "std"),
+            random_mean=("random", "mean"),
+            random_std=("random", "std"),
+            selectivity_mean=("selectivity", "mean"),
+            selectivity_std=("selectivity", "std"),
+            n_seeds=("seed", "nunique"),
+        )
+        .reset_index()
+    )
+    for column in ("real_std", "random_std", "selectivity_std"):
+        summary[column] = summary[column].fillna(0.0)
+    summary["selectivity_sem"] = summary["selectivity_std"] / summary["n_seeds"].map(math.sqrt)
+    summary["selectivity_ci95_low"] = (
+        summary["selectivity_mean"] - 1.96 * summary["selectivity_sem"]
+    )
+    summary["selectivity_ci95_high"] = (
+        summary["selectivity_mean"] + 1.96 * summary["selectivity_sem"]
+    )
+    value_columns = [column for column in summary if column not in group_keys]
+    return summary.rename(columns={column: f"{column_prefix}_{column}" for column in value_columns})
+
+
+def build_fixed_layer_selectivity_accuracy_tables(
+    run_dir: str | Path,
+    *,
+    split: str = "test",
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Build native- and midpoint-rule real/random accuracy tables for one split."""
+
+    metrics = pd.read_csv(Path(run_dir) / "metrics.csv")
+    keys = ["model", "dataset", "layer", "method", "split"]
+    tables: list[pd.DataFrame] = []
+    for decision_rule in ("native", "midpoint"):
+        accuracy = _paired_accuracy_summary(
+            metrics,
+            split=split,
+            metric=f"{decision_rule}_accuracy",
+            column_prefix="accuracy",
+        )
+        balanced = _paired_accuracy_summary(
+            metrics,
+            split=split,
+            metric=f"{decision_rule}_balanced_accuracy",
+            column_prefix="balanced_accuracy",
+        )
+        table = accuracy.merge(balanced, on=keys, validate="one_to_one")
+        table["decision_rule"] = decision_rule
+        table["method_label"] = (
+            table["method"].map(SELECTIVITY_METHOD_LABELS).fillna(table["method"])
+        )
+        method_order = {method: index for index, method in enumerate(SELECTIVITY_METHODS)}
+        table["_method_order"] = table["method"].map(method_order).fillna(len(method_order))
+        table = table.sort_values(["model", "dataset", "_method_order"]).drop(
+            columns="_method_order"
+        )
+        tables.append(table.reset_index(drop=True))
+    return tables[0], tables[1]
+
+
+def save_fixed_layer_selectivity_accuracy_tables(
+    run_dir: str | Path,
+    *,
+    split: str = "test",
+) -> tuple[Path, Path]:
+    """Save the two publication-facing accuracy/selectivity tables."""
+
+    root = Path(run_dir)
+    output_dir = root / "analysis"
+    store = RunArtifactStore(output_dir)
+    native, midpoint = build_fixed_layer_selectivity_accuracy_tables(root, split=split)
+    paths = (
+        output_dir / f"native_{split}_accuracy_selectivity.csv",
+        output_dir / f"midpoint_{split}_accuracy_selectivity.csv",
+    )
+    store.write_rows(paths[0].name, native.to_dict(orient="records"))
+    store.write_rows(paths[1].name, midpoint.to_dict(orient="records"))
+    return paths
+
+
+def plot_fixed_layer_selectivity_accuracy_gaps(
+    run_dir: str | Path,
+    *,
+    split: str = "test",
+    use_balanced_accuracy: bool = False,
+) -> tuple[Path, Path]:
+    """Plot Hewitt-style task/control points joined by the selectivity gap."""
+
+    root = Path(run_dir)
+    tables = build_fixed_layer_selectivity_accuracy_tables(root, split=split)
+    output_dir = root / "analysis" / "figures"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    score_prefix = "balanced_accuracy" if use_balanced_accuracy else "accuracy"
+    score_label = "Balanced accuracy" if use_balanced_accuracy else "Accuracy"
+    models = [model for model in SELECTIVITY_MODELS if model in set(tables[0]["model"])]
+    datasets = list(dict.fromkeys(tables[0]["dataset"].tolist()))
+    paths: list[Path] = []
+
+    sns.set_theme(style="whitegrid")
+    for decision_rule, table in zip(("native", "midpoint"), tables):
+        figure, axes = plt.subplots(
+            len(models),
+            len(datasets),
+            figsize=(5.4 * len(datasets), 4.3 * len(models)),
+            sharey=True,
+            squeeze=False,
+        )
+        for row_index, model in enumerate(models):
+            for column_index, dataset in enumerate(datasets):
+                axis = axes[row_index][column_index]
+                facet = table[(table["model"] == model) & (table["dataset"] == dataset)]
+                facet = (
+                    facet.set_index("method")
+                    .reindex(SELECTIVITY_METHODS)
+                    .dropna(
+                        subset=[f"{score_prefix}_real_mean", f"{score_prefix}_random_mean"],
+                        how="any",
+                    )
+                )
+                positions = list(range(len(facet)))
+                for position, (_, row) in zip(positions, facet.iterrows()):
+                    real = float(row[f"{score_prefix}_real_mean"])
+                    random = float(row[f"{score_prefix}_random_mean"])
+                    axis.plot(
+                        [position, position],
+                        [random, real],
+                        color="#4C566A",
+                        linewidth=3.0,
+                        solid_capstyle="round",
+                        zorder=1,
+                    )
+                    axis.errorbar(
+                        position,
+                        real,
+                        yerr=float(row[f"{score_prefix}_real_std"]),
+                        fmt="o",
+                        color="#2B6CB0",
+                        capsize=3,
+                        markersize=7,
+                        zorder=3,
+                    )
+                    axis.errorbar(
+                        position,
+                        random,
+                        yerr=float(row[f"{score_prefix}_random_std"]),
+                        fmt="s",
+                        color="#C05621",
+                        capsize=3,
+                        markersize=6,
+                        zorder=3,
+                    )
+                    delta = float(row[f"{score_prefix}_selectivity_mean"])
+                    axis.annotate(
+                        f"Δ={delta:.2f}",
+                        (position, (real + random) / 2),
+                        xytext=(7, 0),
+                        textcoords="offset points",
+                        va="center",
+                        fontsize=8,
+                        color="#2D3748",
+                    )
+                axis.axhline(0.5, color="#718096", linestyle=":", linewidth=1)
+                axis.set_xticks(positions)
+                axis.set_xticklabels(facet["method_label"], rotation=20, ha="right")
+                axis.set_ylim(0, 1)
+                dataset_label = SELECTIVITY_DATASET_LABELS.get(dataset, dataset)
+                axis.set_title(f"{model} — {dataset_label}")
+                axis.set_xlabel("Probe method")
+                if column_index == 0:
+                    axis.set_ylabel(score_label)
+        figure.legend(
+            handles=[
+                Line2D([], [], marker="o", linestyle="", color="#2B6CB0", label="Real task"),
+                Line2D(
+                    [], [], marker="s", linestyle="", color="#C05621", label="Random-label task"
+                ),
+                Line2D([], [], color="#4C566A", linewidth=3, label="Selectivity gap"),
+            ],
+            loc="upper center",
+            bbox_to_anchor=(0.5, 0.95),
+            ncol=3,
+            frameon=False,
+        )
+        figure.suptitle(
+            f"{decision_rule.title()} decision rule: real vs random-label {split} {score_label.lower()}",
+            y=0.995,
+        )
+        figure.tight_layout(rect=(0, 0, 1, 0.87))
+        metric_suffix = "balanced_accuracy" if use_balanced_accuracy else "accuracy"
+        path = output_dir / f"hewitt_{decision_rule}_{split}_{metric_suffix}.png"
+        figure.savefig(path, dpi=180, bbox_inches="tight")
+        plt.close(figure)
+        paths.append(path)
+    return tuple(paths)
+
+
 def plot_fixed_layer_selectivity(run_dir: str | Path) -> tuple[Path, ...]:
     root = Path(run_dir)
     metrics = pd.read_csv(root / "metrics.csv")
@@ -684,7 +919,10 @@ def plot_fixed_layer_selectivity(run_dir: str | Path) -> tuple[Path, ...]:
 __all__ = [
     "FixedLayerSelectivityReport",
     "SELECTIVITY_METHODS",
+    "SELECTIVITY_METHOD_LABELS",
+    "SELECTIVITY_DATASET_LABELS",
     "SELECTIVITY_MODELS",
+    "build_fixed_layer_selectivity_accuracy_tables",
     "combine_fixed_layer_selectivity_runs",
     "load_fixed_layer_das_epoch_selections",
     "load_fixed_layer_das_epoch_tuning_trials",
@@ -698,5 +936,7 @@ __all__ = [
     "plot_fixed_layer_das_epoch_tuning",
     "plot_fixed_layer_selectivity",
     "plot_fixed_layer_run_diagnostics",
+    "plot_fixed_layer_selectivity_accuracy_gaps",
+    "save_fixed_layer_selectivity_accuracy_tables",
     "selectivity_run_directories",
 ]

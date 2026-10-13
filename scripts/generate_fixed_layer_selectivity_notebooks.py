@@ -147,6 +147,26 @@ def notebook(method: str, details: dict) -> dict:
     title = details["title"]
     description = details["description"]
     tuning_note = details.get("tuning_note", "")
+    read_only_default = method in {"mean_diff", "logistic_regression"}
+    run_default = str(not read_only_default)
+    workflow_note = (
+        "**Default mode: saved-results display only.** Tuning and final training are disabled "
+        "because these runs are assumed to exist under the shared Drive run ID. The notebook "
+        "loads their tables and regenerates every applicable plot. Set the corresponding flag "
+        "to `True` only when you deliberately want to rerun that stage."
+        if read_only_default
+        else ""
+    )
+    tuning_action = (
+        "Load saved tuning results and visualize them"
+        if read_only_default
+        else "Tune on real validation data and visualize every trial"
+    )
+    training_action = (
+        "Load saved paired real/random-label results"
+        if read_only_default
+        else "Train paired real/random-label tasks with the frozen settings"
+    )
     settings = details["settings"]
     override = details["override"]
     selection_example = {
@@ -202,8 +222,9 @@ def notebook(method: str, details: dict) -> dict:
             METHOD = "{method}"
             DEVICE = "cuda"
             DTYPE = "auto"
-            RUN_TUNING = True
-            RUN_FINAL_TRAINING = True
+            RUN_TUNING = {run_default}
+            RUN_FINAL_TRAINING = {run_default}
+            EXPERIMENTS_ENABLED = RUN_TUNING or RUN_FINAL_TRAINING
             SHOW_PROGRESS = True
             HF_TOKEN_SOURCE = "prompt"  # "prompt" (hidden entry) or "colab_secret".
             """
@@ -377,6 +398,8 @@ def notebook(method: str, details: dict) -> dict:
 
             {description}
 
+            {workflow_note}
+
             Every random-label seed is paired with a real-task run using the same optimization
             seed. Labels are permuted independently within train, validation, and test while
             preserving each split's class counts. Hyperparameters are selected on the real
@@ -508,11 +531,12 @@ def notebook(method: str, details: dict) -> dict:
             """
             ## 3. Authenticate to Hugging Face
 
-            The default `HF_TOKEN_SOURCE = "prompt"` asks for the token through a hidden manual
-            prompt, matching the earlier notebooks. To use Colab Secrets instead, add a secret
-            named `HF_TOKEN` and set `HF_TOKEN_SOURCE = "colab_secret"`. The token is kept only in
-            runtime memory, is never printed or written to Drive, and is placed in the environment
-            only while a model run is actively loading AIT data.
+            When an experiment stage is enabled, the default `HF_TOKEN_SOURCE = "prompt"` asks
+            for the token through a hidden manual prompt, matching the earlier notebooks. To use
+            Colab Secrets instead, add a secret named `HF_TOKEN` and set `HF_TOKEN_SOURCE =
+            "colab_secret"`. Read-only display mode skips authentication. A supplied token is kept
+            only in runtime memory, is never printed or written to Drive, and is placed in the
+            environment only while a model run is actively loading AIT data.
             """
         ),
         code(
@@ -552,18 +576,21 @@ def notebook(method: str, details: dict) -> dict:
                 if value is not None:
                     del value
 
-            _token = get_runtime_secret("HF_TOKEN")
-            try:
-                hf_account = HfApi(token=_token).whoami()["name"]
-            except BaseException:
-                clear_hf_credentials()
-                raise
-            finally:
-                del _token
-            print(
-                f"Authenticated to Hugging Face as {hf_account}. "
-                "Token value was not displayed."
-            )
+            if EXPERIMENTS_ENABLED:
+                _token = get_runtime_secret("HF_TOKEN")
+                try:
+                    hf_account = HfApi(token=_token).whoami()["name"]
+                except BaseException:
+                    clear_hf_credentials()
+                    raise
+                finally:
+                    del _token
+                print(
+                    f"Authenticated to Hugging Face as {hf_account}. "
+                    "Token value was not displayed."
+                )
+            else:
+                print("Read-only display mode: Hugging Face authentication is not required.")
             """
         ),
         markdown(
@@ -850,7 +877,7 @@ def notebook(method: str, details: dict) -> dict:
             f"""
             ## 5. GPT-2 Small
 
-            ### 5a. Tune on real validation data and visualize every trial
+            ### 5a. {tuning_action}
 
             This stage does not train either final real-label or random-label model.
 
@@ -882,7 +909,7 @@ def notebook(method: str, details: dict) -> dict:
         ),
         markdown(
             f"""
-            ### {gpt2_training_number}. Train paired real/random-label tasks with the frozen GPT-2 settings
+            ### {gpt2_training_number}. {training_action}
 
             Final metrics and diagnostic plots appear only after every paired seed finishes.
             """
@@ -892,7 +919,7 @@ def notebook(method: str, details: dict) -> dict:
             f"""
             ## 6. Qwen3-0.6B Base
 
-            ### 6a. Tune on real validation data and visualize every trial
+            ### 6a. {tuning_action}
 
             {qwen_tuning_description}
 
@@ -922,7 +949,7 @@ def notebook(method: str, details: dict) -> dict:
         ),
         markdown(
             f"""
-            ### {qwen_training_number}. Train paired real/random-label tasks with the frozen Qwen settings
+            ### {qwen_training_number}. {training_action}
 
             Final metrics and diagnostic plots appear only after every paired seed finishes.
             """

@@ -2,13 +2,17 @@ import json
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from sentiment_geometry.reporting import (
+    build_fixed_layer_selectivity_accuracy_tables,
     load_fixed_layer_hyperparameter_selections,
     load_fixed_layer_tuning_trials,
     load_fixed_layer_selectivity_report,
     plot_fixed_layer_hyperparameter_tuning,
     plot_fixed_layer_run_diagnostics,
+    plot_fixed_layer_selectivity_accuracy_gaps,
+    save_fixed_layer_selectivity_accuracy_tables,
 )
 
 
@@ -169,3 +173,24 @@ def test_tuning_report_is_available_before_final_metrics(tmp_path):
     assert len(trials) == 2
     assert selections["gpt2-small"]["toy_movie_review"]["das"]["learning_rate"] == 0.001
     assert figure.is_file() and figure.stat().st_size > 0
+
+
+def test_accuracy_selectivity_tables_and_hewitt_style_plots(tmp_path):
+    _write_synthetic_run(tmp_path)
+
+    native, midpoint = build_fixed_layer_selectivity_accuracy_tables(tmp_path)
+
+    assert native.loc[0, "decision_rule"] == "native"
+    assert midpoint.loc[0, "decision_rule"] == "midpoint"
+    assert native.loc[0, "accuracy_real_mean"] == pytest.approx(0.8)
+    assert native.loc[0, "accuracy_random_mean"] == pytest.approx(0.5)
+    assert native.loc[0, "accuracy_selectivity_mean"] == pytest.approx(0.3)
+    assert midpoint.loc[0, "accuracy_selectivity_mean"] == pytest.approx(0.3)
+    assert native.loc[0, "accuracy_n_seeds"] == 2
+    assert native.loc[0, "balanced_accuracy_n_seeds"] == 2
+
+    table_paths = save_fixed_layer_selectivity_accuracy_tables(tmp_path)
+    figure_paths = plot_fixed_layer_selectivity_accuracy_gaps(tmp_path)
+
+    assert all(path.is_file() and path.stat().st_size > 0 for path in table_paths)
+    assert all(path.is_file() and path.stat().st_size > 0 for path in figure_paths)

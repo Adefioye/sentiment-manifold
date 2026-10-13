@@ -47,8 +47,14 @@ def test_selectivity_colab_notebook_is_valid_thin_and_uses_shared_run(method, fi
     assert "tune_fixed_layer_selectivity(config)" in source
     assert "run_fixed_layer_selectivity_with_frozen_hyperparameters(" in source
     assert "plot_fixed_layer_hyperparameter_tuning(run_dir)" in source
-    assert "RUN_TUNING = True" in source
-    assert "RUN_FINAL_TRAINING = True" in source
+    if method in {"mean_diff", "logistic_regression"}:
+        assert "RUN_TUNING = False" in source
+        assert "RUN_FINAL_TRAINING = False" in source
+        assert "Default mode: saved-results display only" in source
+        assert "Read-only display mode: Hugging Face authentication is not required." in source
+    else:
+        assert "RUN_TUNING = True" in source
+        assert "RUN_FINAL_TRAINING = True" in source
     assert "SHOW_PROGRESS = True" in source
     assert 'HF_TOKEN_SOURCE = "prompt"' in source
     assert "from getpass import getpass" in source
@@ -105,6 +111,7 @@ def test_selectivity_notebook_required_public_apis_are_importable():
             "tune_fixed_layer_selectivity",
         },
         "sentiment_geometry.reporting": {
+            "build_fixed_layer_selectivity_accuracy_tables",
             "combine_fixed_layer_selectivity_runs",
             "load_fixed_layer_das_epoch_selections",
             "load_fixed_layer_das_epoch_tuning_trials",
@@ -118,6 +125,8 @@ def test_selectivity_notebook_required_public_apis_are_importable():
             "plot_fixed_layer_mlp1_hidden_tuning",
             "plot_fixed_layer_das_epoch_tuning",
             "plot_fixed_layer_run_diagnostics",
+            "plot_fixed_layer_selectivity_accuracy_gaps",
+            "save_fixed_layer_selectivity_accuracy_tables",
         },
     }
 
@@ -170,3 +179,19 @@ def test_combiner_requires_all_methods_and_models_then_combines(tmp_path):
     metrics = pd.read_csv(combined / "metrics.csv")
     assert len(metrics) == 8
     assert set(metrics["method"]) == set(methods)
+
+
+def test_cross_method_selectivity_analysis_notebook_is_read_only_and_complete():
+    source = _source(PROJECT_ROOT / "notebooks/16_colab_analyze_fixed_layer_selectivity.ipynb")
+
+    assert 'RUN_ID = "fixed-layer-selectivity-v1"' in source
+    assert 'ANALYSIS_SPLIT = "test"' in source
+    assert "combine_fixed_layer_selectivity_runs(RUN_ROOT)" in source
+    assert "build_fixed_layer_selectivity_accuracy_tables(" in source
+    assert "save_fixed_layer_selectivity_accuracy_tables(" in source
+    assert "plot_fixed_layer_selectivity_accuracy_gaps(" in source
+    assert "NATIVE_TABLE[TABLE_COLUMNS]" in source
+    assert "MIDPOINT_TABLE[TABLE_COLUMNS]" in source
+    assert "Hugging Face token" in source
+    assert "run_fixed_layer_selectivity" not in source
+    assert "tune_fixed_layer_selectivity" not in source

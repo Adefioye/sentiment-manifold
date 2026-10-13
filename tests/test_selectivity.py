@@ -13,11 +13,13 @@ from sentiment_geometry.experiments.selectivity import (
     run_fixed_layer_selectivity,
     run_fixed_layer_selectivity_with_frozen_hyperparameters,
     tune_fixed_layer_das_epoch_budgets,
+    tune_fixed_layer_mlp1_hidden_sizes,
     tune_fixed_layer_selectivity,
 )
 from sentiment_geometry.experiments.selectivity import experiment as selectivity_experiment
 from sentiment_geometry.experiments.selectivity.config import (
     FixedLayerModelConfig,
+    MLP1SearchConfig,
     SelectivityDataConfig,
     SelectivityOutputConfig,
     SelectivityProgressConfig,
@@ -26,6 +28,7 @@ from sentiment_geometry.experiments.selectivity.datasets import (
     PreparedSelectivityData,
     randomize_data,
 )
+from sentiment_geometry.experiments.selectivity.fitting import select_mlp1_probe
 from sentiment_geometry.probes import (
     LogisticProbeConfig,
     MLP1ProbeConfig,
@@ -126,6 +129,31 @@ def test_mlp1_is_reproducible_and_uses_training_only_standardization():
     assert first.direction is None
 
 
+def test_mlp1_tuning_rows_include_training_diagnostics():
+    train_x, train_y, validation_x, validation_y = _separable_data()
+    selected = select_mlp1_probe(
+        train_x,
+        train_y,
+        validation_x,
+        validation_y,
+        search=MLP1SearchConfig(
+            trials=[{"hidden_size": 2, "learning_rate": 0.01, "weight_decay": 0.01}],
+            batch_size=3,
+            max_epochs=8,
+            patience=3,
+        ),
+        seed=9,
+    )
+
+    trial = selected.tuning_trials[0]
+    assert trial["selected"] is True
+    assert trial["n_parameters"] > 0
+    assert 1 <= trial["best_epoch"] <= trial["epoch_budget"] == 8
+    assert 1 <= trial["epochs_completed"] <= trial["epoch_budget"]
+    assert isinstance(trial["stopped_early"], bool)
+    assert np.isfinite(trial["best_training_loss"])
+
+
 def test_randomize_data_assigns_every_split_and_keeps_ids():
     examples = {
         role: tuple(
@@ -166,7 +194,7 @@ def test_selectivity_config_loads_fixed_dataset_layers_and_manual_trials():
     assert config.random_labels.seeds == [11, 22, 33, 44, 55]
     assert len(config.logistic_regression.candidates()) == 3
     assert len(config.das.candidates()) == 10
-    assert len(config.mlp1.candidates()) == 3
+    assert len(config.mlp1.candidates()) == 5
     assert config.das.objective == "answer_cross_entropy"
     assert config.das.intervention_position == "final"
     assert config.progress.enabled is True
@@ -360,10 +388,7 @@ def test_tuning_resumes_completed_dataset_after_later_failure(tmp_path, monkeypa
         collected.append(data.name)
         if data.name == "full_ait" and fail_full_ait:
             raise RuntimeError("simulated interruption")
-        return {
-            role: np.zeros((len(rows), 2), dtype=np.float32)
-            for role, rows in examples.items()
-        }
+        return {role: np.zeros((len(rows), 2), dtype=np.float32) for role, rows in examples.items()}
 
     monkeypatch.setattr(
         selectivity_experiment.FixedLayerSelectivityExperiment,
@@ -479,5 +504,111 @@ def test_das_epoch_tuning_preserves_learning_rate_artifacts(tmp_path, monkeypatc
     assert json.loads((result / "selected_hyperparameters.json").read_text()) == base
 
     tune_fixed_layer_das_epoch_budgets(config, base, [32, 64, 96, 128, 160])
+
+    assert tuning_calls == ["toy_movie_review", "full_ait"]
+
+
+def test_mlp1_hidden_tuning_preserves_learning_rate_artifacts(tmp_path, monkeypatch):
+    device = torch.device("cpu")
+    adapter = SimpleNamespace(
+        device_spec=SimpleNamespace(device=device),
+        n_layers=12,
+        provenance=lambda: {"revision": "test"},
+    )
+    examples = {
+        role: tuple(
+            TextExample(text=f"{role}-{index}", label=index % 2, example_id=f"{role}-{index}")
+            for index in range(4)
+        )
+        for role in ("train", "validation", "test")
+    }
+    config = FixedLayerSelectivityConfig(
+        models=[FixedLayerModelConfig(name="gpt2-small", layer=10)],
+        methods=["mlp1"],
+        data=SelectivityDataConfig(datasets=["toy_movie_review", "full_ait"]),
+        output=SelectivityOutputConfig(
+            output_dir=str(tmp_path), run_id="staged", cache_activations=True
+        ),
+        progress=SelectivityProgressConfig(enabled=False),
+    )
+    base = {
+        "gpt2-small": {
+            "toy_movie_review": {
+                "mlp1": MLP1ProbeConfig(
+                    hidden_size=10, learning_rate=0.003, weight_decay=0.01
+                ).__dict__
+            },
+            "full_ait": {
+                "mlp1": MLP1ProbeConfig(
+                    hidden_size=10, learning_rate=0.001, weight_decay=0.01
+                ).__dict__
+            },
+        }
+    }
+    run_dir = tmp_path / "staged"
+    run_dir.mkdir()
+    original_trials = "original learning-rate trials\n"
+    (run_dir / "tuning_trials.csv").write_text(original_trials)
+    (run_dir / "selected_hyperparameters.json").write_text(json.dumps(base))
+
+    monkeypatch.setattr(
+        selectivity_experiment.CausalLMAdapter,
+        "from_pretrained",
+        staticmethod(lambda *args, **kwargs: adapter),
+    )
+    monkeypatch.setattr(
+        selectivity_experiment.FixedLayerSelectivityExperiment,
+        "_prepare_data",
+        lambda self, dataset_name, *args: SimpleNamespace(name=dataset_name, examples=examples),
+    )
+    monkeypatch.setattr(
+        selectivity_experiment.FixedLayerSelectivityExperiment,
+        "_collect_activations",
+        lambda *args, **kwargs: {
+            role: np.zeros((len(rows), 2), dtype=np.float32) for role, rows in examples.items()
+        },
+    )
+
+    tuning_calls = []
+
+    def fake_select_mlp1(*args, search, **kwargs):
+        dataset_name = "toy_movie_review" if not tuning_calls else "full_ait"
+        tuning_calls.append(dataset_name)
+        expected_lr = 0.003 if dataset_name == "toy_movie_review" else 0.001
+        candidates = search.candidates()
+        assert [candidate.hidden_size for candidate in candidates] == [2, 4, 8, 16, 32]
+        assert {candidate.learning_rate for candidate in candidates} == {expected_lr}
+        assert {candidate.weight_decay for candidate in candidates} == {0.01}
+        selected_index = 2 if dataset_name == "toy_movie_review" else 4
+        rows = tuple(
+            {
+                "trial_index": index,
+                "hyperparameters": candidate.__dict__,
+                "validation_native_accuracy": 0.5 + 0.1 * index,
+                "validation_native_balanced_accuracy": 0.5 + 0.1 * index,
+                "validation_midpoint_accuracy": 0.5 + 0.1 * index,
+                "validation_midpoint_balanced_accuracy": 0.5 + 0.1 * index,
+                "validation_loss": 1.0 - 0.1 * index,
+                "selected": index == selected_index,
+            }
+            for index, candidate in enumerate(candidates)
+        )
+        return SimpleNamespace(
+            hyperparameters=candidates[selected_index].__dict__, tuning_trials=rows
+        )
+
+    monkeypatch.setattr(selectivity_experiment, "select_mlp1_probe", fake_select_mlp1)
+
+    result = tune_fixed_layer_mlp1_hidden_sizes(config, base, [2, 4, 8, 16, 32])
+    selected = json.loads((result / "mlp1_hidden_selected_hyperparameters.json").read_text())
+
+    assert selected["gpt2-small"]["toy_movie_review"]["mlp1"]["learning_rate"] == 0.003
+    assert selected["gpt2-small"]["toy_movie_review"]["mlp1"]["hidden_size"] == 8
+    assert selected["gpt2-small"]["full_ait"]["mlp1"]["learning_rate"] == 0.001
+    assert selected["gpt2-small"]["full_ait"]["mlp1"]["hidden_size"] == 32
+    assert (result / "tuning_trials.csv").read_text() == original_trials
+    assert json.loads((result / "selected_hyperparameters.json").read_text()) == base
+
+    tune_fixed_layer_mlp1_hidden_sizes(config, base, [2, 4, 8, 16, 32])
 
     assert tuning_calls == ["toy_movie_review", "full_ait"]

@@ -85,6 +85,14 @@ def test_selectivity_colab_notebook_is_valid_thin_and_uses_shared_run(method, fi
         assert "tune_fixed_layer_das_epoch_budgets(" in source
         assert "plot_fixed_layer_das_epoch_tuning(run_dir)" in source
         assert "das_epoch_tuning_and_display(" in source
+    if method == "mlp1":
+        assert "Two-stage tuning note" in source
+        assert "MLP1_HIDDEN_SIZES = [2, 4, 8, 16, 32]" in source
+        assert "tune_fixed_layer_mlp1_hidden_sizes(" in source
+        assert "plot_fixed_layer_mlp1_hidden_tuning(run_dir)" in source
+        assert "mlp1_hidden_tuning_and_display(" in source
+        assert source.count('"hidden_size": 10, "learning_rate":') == 5
+        assert '"epochs_completed", "stopped_early", "n_parameters"' in source
 
 
 def test_selectivity_notebook_required_public_apis_are_importable():
@@ -93,6 +101,7 @@ def test_selectivity_notebook_required_public_apis_are_importable():
             "FixedLayerSelectivityConfig",
             "run_fixed_layer_selectivity_with_frozen_hyperparameters",
             "tune_fixed_layer_das_epoch_budgets",
+            "tune_fixed_layer_mlp1_hidden_sizes",
             "tune_fixed_layer_selectivity",
         },
         "sentiment_geometry.reporting": {
@@ -100,10 +109,13 @@ def test_selectivity_notebook_required_public_apis_are_importable():
             "load_fixed_layer_das_epoch_selections",
             "load_fixed_layer_das_epoch_tuning_trials",
             "load_fixed_layer_hyperparameter_selections",
+            "load_fixed_layer_mlp1_hidden_selections",
+            "load_fixed_layer_mlp1_hidden_tuning_trials",
             "load_fixed_layer_tuning_trials",
             "load_fixed_layer_selectivity_report",
             "plot_fixed_layer_selectivity",
             "plot_fixed_layer_hyperparameter_tuning",
+            "plot_fixed_layer_mlp1_hidden_tuning",
             "plot_fixed_layer_das_epoch_tuning",
             "plot_fixed_layer_run_diagnostics",
         },

@@ -64,9 +64,7 @@ def select_logistic_probe(
                 "validation_native_accuracy": evaluation.native_accuracy,
                 "validation_native_balanced_accuracy": evaluation.native_balanced_accuracy,
                 "validation_midpoint_accuracy": evaluation.midpoint_accuracy,
-                "validation_midpoint_balanced_accuracy": (
-                    evaluation.midpoint_balanced_accuracy
-                ),
+                "validation_midpoint_balanced_accuracy": (evaluation.midpoint_balanced_accuracy),
                 "validation_loss": None,
             }
         )
@@ -81,8 +79,7 @@ def select_logistic_probe(
     return replace(
         selected,
         tuning_trials=tuple(
-            {**row, "selected": index == selected_index}
-            for index, row in enumerate(trial_rows)
+            {**row, "selected": index == selected_index} for index, row in enumerate(trial_rows)
         ),
     )
 
@@ -124,6 +121,9 @@ def select_mlp1_probe(
             native_threshold=probe.native_threshold,
         )
         hyperparameters = asdict(candidate)
+        history = tuple(probe.state()["history"])
+        best_epoch_index = int(probe.diagnostics["best_epoch"])
+        best_epoch = best_epoch_index + 1
         candidates.append(
             SelectedProbe(probe, hyperparameters, evaluation.native_balanced_accuracy)
         )
@@ -134,12 +134,15 @@ def select_mlp1_probe(
                 "validation_native_accuracy": evaluation.native_accuracy,
                 "validation_native_balanced_accuracy": evaluation.native_balanced_accuracy,
                 "validation_midpoint_accuracy": evaluation.midpoint_accuracy,
-                "validation_midpoint_balanced_accuracy": (
-                    evaluation.midpoint_balanced_accuracy
-                ),
-                "validation_loss": float(
-                    probe.diagnostics["best_validation_loss"]
-                ),
+                "validation_midpoint_balanced_accuracy": (evaluation.midpoint_balanced_accuracy),
+                "validation_loss": float(probe.diagnostics["best_validation_loss"]),
+                "n_parameters": int(probe.diagnostics["n_parameters"]),
+                "best_epoch": best_epoch,
+                "epoch_budget": candidate.max_epochs,
+                "best_epoch_near_budget": best_epoch >= 0.9 * candidate.max_epochs,
+                "epochs_completed": len(history),
+                "stopped_early": len(history) < candidate.max_epochs,
+                "best_training_loss": float(history[best_epoch_index]["training_loss"]),
             }
         )
     selected = max(
@@ -154,8 +157,7 @@ def select_mlp1_probe(
     return replace(
         selected,
         tuning_trials=tuple(
-            {**row, "selected": index == selected_index}
-            for index, row in enumerate(trial_rows)
+            {**row, "selected": index == selected_index} for index, row in enumerate(trial_rows)
         ),
     )
 

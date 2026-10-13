@@ -95,15 +95,24 @@ METHODS = {
         "title": "MLP-1 random-label selectivity",
         "filename": "colab_fixed_layer_mlp1_selectivity",
         "description": (
-            "Three explicit one-hidden-layer MLP trials vary hidden width, learning rate, "
-            "and weight decay. Selection uses real validation balanced accuracy."
+            "Five explicit MLP-1 trials first vary only learning rate at hidden size 10. "
+            "A second stage freezes each dataset's selected learning rate and varies hidden "
+            "size. Weight decay remains fixed at 0.01 throughout."
+        ),
+        "tuning_note": (
+            "**Two-stage tuning note.** Stage one compares five approximately log-spaced "
+            "learning rates with hidden size 10. Stage two compares hidden sizes 2, 4, 8, 16, "
+            "and 32 at each dataset's selected learning rate. Both selections use real validation "
+            "balanced accuracy only; test data and random-label performance never select settings."
         ),
         "settings": dedent(
             """
             MANUAL_TRIALS = [
-                {"hidden_size": 4, "learning_rate": 0.001, "weight_decay": 0.01},
+                {"hidden_size": 10, "learning_rate": 0.0001, "weight_decay": 0.01},
+                {"hidden_size": 10, "learning_rate": 0.0003, "weight_decay": 0.01},
                 {"hidden_size": 10, "learning_rate": 0.001, "weight_decay": 0.01},
-                {"hidden_size": 32, "learning_rate": 0.001, "weight_decay": 0.01},
+                {"hidden_size": 10, "learning_rate": 0.003, "weight_decay": 0.01},
+                {"hidden_size": 10, "learning_rate": 0.01, "weight_decay": 0.01},
             ]
             """
         ).strip(),
@@ -153,9 +162,9 @@ def notebook(method: str, details: dict) -> dict:
     qwen_selection_example = selection_example.replace("GPT2", "QWEN").replace(
         '"gpt2-small"', '"qwen-0.6b"'
     )
-    das_settings = ""
+    additional_settings = ""
     if method == "das":
-        das_settings = dedent(
+        additional_settings = dedent(
             """
             # GPT-2 learning-rate tuning is already complete on Drive. Keep this False.
             # Qwen's interrupted run saved activations but no durable ToyMovieReview LR
@@ -173,6 +182,13 @@ def notebook(method: str, details: dict) -> dict:
                 "qwen-0.6b": True,
             }
             DAS_EPOCH_BUDGETS = [32, 64, 96, 128, 160]
+            """
+        ).strip()
+    elif method == "mlp1":
+        additional_settings = dedent(
+            """
+            RUN_MLP1_HIDDEN_TUNING = True
+            MLP1_HIDDEN_SIZES = [2, 4, 8, 16, 32]
             """
         ).strip()
     settings_source = (
@@ -194,16 +210,32 @@ def notebook(method: str, details: dict) -> dict:
         ).strip()
         + "\n\n"
         + settings
-        + (("\n\n" + das_settings) if das_settings else "")
+        + (("\n\n" + additional_settings) if additional_settings else "")
     )
     gpt2_tuning_call = 'tuning_and_display("gpt2-small")'
     qwen_tuning_call = 'tuning_and_display("qwen-0.6b")'
-    gpt2_epoch_cells: list[dict] = []
-    qwen_epoch_cells: list[dict] = []
+    gpt2_secondary_tuning_cells: list[dict] = []
+    qwen_secondary_tuning_cells: list[dict] = []
     gpt2_inspect_number = "5b"
     gpt2_training_number = "5c"
     qwen_inspect_number = "6b"
     qwen_training_number = "6c"
+    qwen_tuning_description = (
+        "This repeats the complete selection process independently for Qwen and both datasets."
+    )
+    plot_inventory_note = ""
+    gpt2_final_training_call = dedent(
+        """
+        GPT2_RUN_DIR = final_training_and_display("gpt2-small", GPT2_SELECTIONS)
+        print("GPT-2 final artifacts:", GPT2_RUN_DIR)
+        """
+    )
+    qwen_final_training_call = dedent(
+        """
+        QWEN_RUN_DIR = final_training_and_display("qwen-0.6b", QWEN_SELECTIONS)
+        print("Qwen final artifacts:", QWEN_RUN_DIR)
+        """
+    )
     if method == "das":
         gpt2_tuning_call = (
             'tuning_and_display("gpt2-small", run_tuning=RUN_LEARNING_RATE_TUNING["gpt2-small"])'
@@ -215,7 +247,32 @@ def notebook(method: str, details: dict) -> dict:
         gpt2_training_number = "5d"
         qwen_inspect_number = "6c"
         qwen_training_number = "6d"
-        gpt2_epoch_cells = [
+        qwen_tuning_description = (
+            "The earlier interrupted Qwen run did not persist a ToyMovieReview learning-rate "
+            "selection. Section 6a therefore reruns the five Qwen learning-rate candidates for "
+            "ToyMovieReview, saves its validation-selected rate, and then continues to full AIT."
+        )
+        gpt2_final_training_call = dedent(
+            """
+            GPT2_RUN_DIR = final_training_and_display(
+                "gpt2-small",
+                GPT2_SELECTIONS,
+                run_training=RUN_FINAL_TRAINING_BY_MODEL["gpt2-small"],
+            )
+            print("GPT-2 final artifacts:", GPT2_RUN_DIR)
+            """
+        )
+        qwen_final_training_call = dedent(
+            """
+            QWEN_RUN_DIR = final_training_and_display(
+                "qwen-0.6b",
+                QWEN_SELECTIONS,
+                run_training=RUN_FINAL_TRAINING_BY_MODEL["qwen-0.6b"],
+            )
+            print("Qwen final artifacts:", QWEN_RUN_DIR)
+            """
+        )
+        gpt2_secondary_tuning_cells = [
             markdown(
                 """
                 ### 5b. Tune the epoch budget at GPT-2's selected learning rates
@@ -236,7 +293,7 @@ def notebook(method: str, details: dict) -> dict:
                 """
             ),
         ]
-        qwen_epoch_cells = [
+        qwen_secondary_tuning_cells = [
             markdown(
                 """
                 ### 6b. Tune the epoch budget at Qwen's selected learning rates
@@ -253,6 +310,59 @@ def notebook(method: str, details: dict) -> dict:
                     "qwen-0.6b", QWEN_SELECTIONS
                 )
                 print("Qwen epoch-tuning artifacts:", QWEN_EPOCH_TUNING_DIR)
+                """
+            ),
+        ]
+    elif method == "mlp1":
+        gpt2_inspect_number = "5c"
+        gpt2_training_number = "5d"
+        qwen_inspect_number = "6c"
+        qwen_training_number = "6d"
+        plot_inventory_note = dedent(
+            """
+            The MLP-1 workflow saves and displays the same applicable plot families as DAS:
+            a stage-one learning-rate plot, a stage-two model-capacity plot, real-versus-random
+            accuracy, paired selectivity, and final-training loss curves. DAS's IIA/recovery/
+            logit-flip/sign-flip figure is intentionally absent because an MLP classifier is not
+            a one-dimensional intervention direction.
+            """
+        ).strip()
+        gpt2_secondary_tuning_cells = [
+            markdown(
+                """
+                ### 5b. Tune hidden size at GPT-2's selected learning rates
+
+                This stage freezes the independently selected ToyMovieReview and full-AIT
+                learning rates, then compares hidden sizes `2, 4, 8, 16, 32`. Weight decay remains
+                `0.01`. Selection uses real validation balanced accuracy only, and the original
+                learning-rate artifacts remain intact.
+                """
+            ),
+            code(
+                """
+                GPT2_HIDDEN_TUNING_DIR, GPT2_SELECTIONS = mlp1_hidden_tuning_and_display(
+                    "gpt2-small", GPT2_SELECTIONS
+                )
+                print("GPT-2 hidden-size tuning artifacts:", GPT2_HIDDEN_TUNING_DIR)
+                """
+            ),
+        ]
+        qwen_secondary_tuning_cells = [
+            markdown(
+                """
+                ### 6b. Tune hidden size at Qwen's selected learning rates
+
+                This stage freezes Qwen's dataset-specific learning rates and compares hidden
+                sizes `2, 4, 8, 16, 32`, with weight decay fixed at `0.01`. Selection again uses
+                only real validation balanced accuracy.
+                """
+            ),
+            code(
+                """
+                QWEN_HIDDEN_TUNING_DIR, QWEN_SELECTIONS = mlp1_hidden_tuning_and_display(
+                    "qwen-0.6b", QWEN_SELECTIONS
+                )
+                print("Qwen hidden-size tuning artifacts:", QWEN_HIDDEN_TUNING_DIR)
                 """
             ),
         ]
@@ -360,6 +470,7 @@ def notebook(method: str, details: dict) -> dict:
                     "FixedLayerSelectivityConfig",
                     "run_fixed_layer_selectivity_with_frozen_hyperparameters",
                     "tune_fixed_layer_das_epoch_budgets",
+                    "tune_fixed_layer_mlp1_hidden_sizes",
                     "tune_fixed_layer_selectivity",
                 },
                 "sentiment_geometry.reporting": {
@@ -367,11 +478,14 @@ def notebook(method: str, details: dict) -> dict:
                     "load_fixed_layer_das_epoch_selections",
                     "load_fixed_layer_das_epoch_tuning_trials",
                     "load_fixed_layer_hyperparameter_selections",
+                    "load_fixed_layer_mlp1_hidden_selections",
+                    "load_fixed_layer_mlp1_hidden_tuning_trials",
                     "load_fixed_layer_tuning_trials",
                     "load_fixed_layer_selectivity_report",
                     "plot_fixed_layer_selectivity",
                     "plot_fixed_layer_das_epoch_tuning",
                     "plot_fixed_layer_hyperparameter_tuning",
+                    "plot_fixed_layer_mlp1_hidden_tuning",
                     "plot_fixed_layer_run_diagnostics",
                 },
             }
@@ -453,13 +567,15 @@ def notebook(method: str, details: dict) -> dict:
             """
         ),
         markdown(
-            """
+            f"""
             ## 4. Verify the protocol and define the staged runners
 
             A trial list contains complete hand-chosen configurations, not a grid. There are no
             more than three user-adjusted hyperparameters for this method. The tuning runner stops
             after validation-only selection and visualization. The final runner starts separately
             and uses exactly the frozen settings shown between the two stages.
+
+            {plot_inventory_note}
             """
         ),
         code(
@@ -471,6 +587,7 @@ def notebook(method: str, details: dict) -> dict:
                 FixedLayerSelectivityConfig,
                 run_fixed_layer_selectivity_with_frozen_hyperparameters,
                 tune_fixed_layer_das_epoch_budgets,
+                tune_fixed_layer_mlp1_hidden_sizes,
                 tune_fixed_layer_selectivity,
             )
             from sentiment_geometry.reporting import (
@@ -478,11 +595,14 @@ def notebook(method: str, details: dict) -> dict:
                 load_fixed_layer_das_epoch_selections,
                 load_fixed_layer_das_epoch_tuning_trials,
                 load_fixed_layer_hyperparameter_selections,
+                load_fixed_layer_mlp1_hidden_selections,
+                load_fixed_layer_mlp1_hidden_tuning_trials,
                 load_fixed_layer_tuning_trials,
                 load_fixed_layer_selectivity_report,
                 plot_fixed_layer_selectivity,
                 plot_fixed_layer_das_epoch_tuning,
                 plot_fixed_layer_hyperparameter_tuning,
+                plot_fixed_layer_mlp1_hidden_tuning,
                 plot_fixed_layer_run_diagnostics,
             )
 
@@ -549,12 +669,14 @@ def notebook(method: str, details: dict) -> dict:
                             "validation_loss", "validation_recovery",
                             "validation_logit_flip", "validation_sign_flip", "selected",
                             "best_epoch", "epoch_budget", "best_epoch_near_budget",
+                            "epochs_completed", "stopped_early", "n_parameters",
+                            "best_training_loss",
                         ],
                     )
                     tuning_figure = plot_fixed_layer_hyperparameter_tuning(run_dir)
                     print("Validation-only tuning plot:", tuning_figure)
                     display(Image(filename=str(tuning_figure)))
-                print("Frozen settings (inspect before starting final training):")
+                print("Frozen settings from this tuning stage:")
                 display(pd.json_normalize(selections, sep=" → ").T.rename(columns={{0: "value"}}))
                 return run_dir, selections
 
@@ -592,6 +714,45 @@ def notebook(method: str, details: dict) -> dict:
                 print("Validation-only DAS epoch-budget plot:", figure)
                 display(Image(filename=str(figure)))
                 print("Frozen learning-rate plus epoch selections:")
+                display(pd.json_normalize(selections, sep=" → ").T.rename(columns={{0: "value"}}))
+                return run_dir, selections
+
+            def mlp1_hidden_tuning_and_display(model_name, learning_rate_selections):
+                if METHOD != "mlp1":
+                    raise ValueError("Hidden-size tuning is only defined for MLP-1.")
+                config = configured_run(model_name)
+                run_dir = Path(config.output.output_dir) / config.output.run_id
+                if RUN_MLP1_HIDDEN_TUNING:
+                    token_env = config.data.hf_token_env
+                    os.environ[token_env] = get_runtime_secret("HF_TOKEN")
+                    try:
+                        run_dir = tune_fixed_layer_mlp1_hidden_sizes(
+                            config,
+                            learning_rate_selections,
+                            MLP1_HIDDEN_SIZES,
+                        )
+                    finally:
+                        release_hf_environment(token_env)
+                selections = load_fixed_layer_mlp1_hidden_selections(run_dir)
+                trials = load_fixed_layer_mlp1_hidden_tuning_trials(run_dir)
+                display_table(
+                    "Validation-only hidden-size trials (selected rows are marked):",
+                    trials,
+                    [
+                        "dataset", "layer", "trial_index", "hyperparameters",
+                        "validation_native_accuracy",
+                        "validation_native_balanced_accuracy",
+                        "validation_midpoint_accuracy",
+                        "validation_midpoint_balanced_accuracy",
+                        "validation_loss", "selected", "best_epoch", "epoch_budget",
+                        "best_epoch_near_budget", "epochs_completed", "stopped_early",
+                        "n_parameters", "best_training_loss",
+                    ],
+                )
+                figure = plot_fixed_layer_mlp1_hidden_tuning(run_dir)
+                print("Validation-only MLP-1 hidden-size plot:", figure)
+                display(Image(filename=str(figure)))
+                print("Frozen learning-rate plus hidden-size selections:")
                 display(pd.json_normalize(selections, sep=" → ").T.rename(columns={{0: "value"}}))
                 return run_dir, selections
 
@@ -702,7 +863,7 @@ def notebook(method: str, details: dict) -> dict:
             print("GPT-2 tuning artifacts:", GPT2_TUNING_DIR)
             """
         ),
-        *gpt2_epoch_cells,
+        *gpt2_secondary_tuning_cells,
         markdown(
             f"""
             ### {gpt2_inspect_number}. Inspect or deliberately override the frozen GPT-2 settings
@@ -726,25 +887,14 @@ def notebook(method: str, details: dict) -> dict:
             Final metrics and diagnostic plots appear only after every paired seed finishes.
             """
         ),
-        code(
-            """
-            GPT2_RUN_DIR = final_training_and_display(
-                "gpt2-small",
-                GPT2_SELECTIONS,
-                run_training=RUN_FINAL_TRAINING_BY_MODEL["gpt2-small"],
-            )
-            print("GPT-2 final artifacts:", GPT2_RUN_DIR)
-            """
-        ),
+        code(gpt2_final_training_call),
         markdown(
             f"""
             ## 6. Qwen3-0.6B Base
 
             ### 6a. Tune on real validation data and visualize every trial
 
-            The earlier interrupted Qwen run did not persist a ToyMovieReview learning-rate
-            selection. Section 6a therefore reruns the five Qwen learning-rate candidates for
-            ToyMovieReview, saves its validation-selected rate, and then continues to full AIT.
+            {qwen_tuning_description}
 
             {tuning_note}
             """
@@ -755,7 +905,7 @@ def notebook(method: str, details: dict) -> dict:
             print("Qwen tuning artifacts:", QWEN_TUNING_DIR)
             """
         ),
-        *qwen_epoch_cells,
+        *qwen_secondary_tuning_cells,
         markdown(
             f"""
             ### {qwen_inspect_number}. Inspect or deliberately override the frozen Qwen settings
@@ -777,16 +927,7 @@ def notebook(method: str, details: dict) -> dict:
             Final metrics and diagnostic plots appear only after every paired seed finishes.
             """
         ),
-        code(
-            """
-            QWEN_RUN_DIR = final_training_and_display(
-                "qwen-0.6b",
-                QWEN_SELECTIONS,
-                run_training=RUN_FINAL_TRAINING_BY_MODEL["qwen-0.6b"],
-            )
-            print("Qwen final artifacts:", QWEN_RUN_DIR)
-            """
-        ),
+        code(qwen_final_training_call),
         markdown(
             """
             ## 7. Aggregate and plot only after every notebook is complete

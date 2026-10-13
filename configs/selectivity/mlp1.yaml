@@ -1,9 +1,12 @@
-# Explicit manual trials, not a Cartesian grid. Edit only hidden size, learning
-# rate, and weight decay. Dropout and the training policy remain fixed.
+# Stage-one explicit learning-rate trials. Hidden size and weight decay remain
+# fixed so learning rate is the only changing factor. The notebook's second
+# stage varies hidden size at each dataset's selected learning rate.
 trials:
-  - {hidden_size: 4, learning_rate: 0.001, weight_decay: 0.01}
+  - {hidden_size: 10, learning_rate: 0.0001, weight_decay: 0.01}
+  - {hidden_size: 10, learning_rate: 0.0003, weight_decay: 0.01}
   - {hidden_size: 10, learning_rate: 0.001, weight_decay: 0.01}
-  - {hidden_size: 32, learning_rate: 0.001, weight_decay: 0.01}
+  - {hidden_size: 10, learning_rate: 0.003, weight_decay: 0.01}
+  - {hidden_size: 10, learning_rate: 0.01, weight_decay: 0.01}
 dropout: 0.0
 batch_size: 16
 max_epochs: 500

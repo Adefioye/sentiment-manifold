@@ -16,6 +16,7 @@ from .experiment import (
     run_fixed_layer_selectivity,
     run_fixed_layer_selectivity_with_frozen_hyperparameters,
     tune_fixed_layer_das_epoch_budgets,
+    tune_fixed_layer_mlp1_hidden_sizes,
     tune_fixed_layer_selectivity,
 )
 
@@ -33,5 +34,6 @@ __all__ = [
     "run_fixed_layer_selectivity",
     "run_fixed_layer_selectivity_with_frozen_hyperparameters",
     "tune_fixed_layer_das_epoch_budgets",
+    "tune_fixed_layer_mlp1_hidden_sizes",
     "tune_fixed_layer_selectivity",
 ]

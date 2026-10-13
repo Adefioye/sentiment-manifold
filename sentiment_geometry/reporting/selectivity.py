@@ -94,6 +94,32 @@ def load_fixed_layer_das_epoch_tuning_trials(run_dir: str | Path) -> pd.DataFram
     return trials
 
 
+def load_fixed_layer_mlp1_hidden_selections(
+    run_dir: str | Path,
+) -> dict[str, dict[str, dict[str, Any]]]:
+    """Load MLP-1 settings selected by the second-stage hidden-size sweep."""
+
+    path = Path(run_dir) / "mlp1_hidden_selected_hyperparameters.json"
+    if not path.is_file():
+        raise FileNotFoundError(f"No MLP-1 hidden-size selection at {path}")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise TypeError("MLP-1 hidden-size selections must be a JSON object")
+    return payload
+
+
+def load_fixed_layer_mlp1_hidden_tuning_trials(run_dir: str | Path) -> pd.DataFrame:
+    """Load validation-only MLP-1 hidden-size trials."""
+
+    trials = _read_optional_csv(Path(run_dir), "mlp1_hidden_tuning_trials.csv")
+    if trials.empty:
+        raise FileNotFoundError(
+            "No MLP-1 hidden-size tuning trials at "
+            f"{Path(run_dir) / 'mlp1_hidden_tuning_trials.csv'}"
+        )
+    return trials
+
+
 def _tuning_trial_label(row: pd.Series, varying_keys: list[str]) -> str:
     parameters = json.loads(str(row["hyperparameters"]))
     details = ", ".join(f"{key}={parameters[key]}" for key in varying_keys)
@@ -209,6 +235,60 @@ def plot_fixed_layer_das_epoch_tuning(run_dir: str | Path) -> Path:
     figure_dir = root / "figures"
     figure_dir.mkdir(parents=True, exist_ok=True)
     path = figure_dir / "das_epoch_budget_tuning.png"
+    grid.figure.savefig(path, dpi=180, bbox_inches="tight")
+    plt.close(grid.figure)
+    return path
+
+
+def plot_fixed_layer_mlp1_hidden_tuning(run_dir: str | Path) -> Path:
+    """Plot validation accuracy for hidden sizes at the selected learning rate."""
+
+    root = Path(run_dir)
+    trials = load_fixed_layer_mlp1_hidden_tuning_trials(root).copy()
+    trials["hidden_size"] = [
+        int(json.loads(value)["hidden_size"]) for value in trials["hyperparameters"]
+    ]
+    trials["trial"] = trials.apply(
+        lambda row: ("* " if bool(row["selected"]) else "") + f"hidden={int(row['hidden_size'])}",
+        axis=1,
+    )
+    metric_columns = {
+        "validation_native_balanced_accuracy": ("Native balanced accuracy (selection metric)"),
+        "validation_midpoint_balanced_accuracy": "Midpoint balanced accuracy",
+    }
+    available = [
+        column for column in metric_columns if column in trials and trials[column].notna().any()
+    ]
+    plotted = trials.melt(
+        id_vars=["dataset", "trial", "hidden_size"],
+        value_vars=available,
+        var_name="metric",
+        value_name="validation_score",
+    ).dropna(subset=["validation_score"])
+    plotted["metric"] = plotted["metric"].map(metric_columns)
+    plotted = plotted.sort_values(["dataset", "hidden_size"])
+    sns.set_theme(style="whitegrid")
+    grid = sns.catplot(
+        data=plotted,
+        x="trial",
+        y="validation_score",
+        hue="metric",
+        col="dataset",
+        kind="point",
+        sharex=False,
+        height=4.0,
+        aspect=1.5,
+    )
+    grid.set(ylim=(0, 1))
+    grid.set_axis_labels("Hidden size", "Validation balanced accuracy")
+    grid.set_xticklabels(rotation=20, ha="right")
+    grid.figure.suptitle(
+        "MLP-1 hidden-size tuning at the selected learning rate (* = selection)",
+        y=1.04,
+    )
+    figure_dir = root / "figures"
+    figure_dir.mkdir(parents=True, exist_ok=True)
+    path = figure_dir / "mlp1_hidden_size_tuning.png"
     grid.figure.savefig(path, dpi=180, bbox_inches="tight")
     plt.close(grid.figure)
     return path
@@ -609,9 +689,12 @@ __all__ = [
     "load_fixed_layer_das_epoch_selections",
     "load_fixed_layer_das_epoch_tuning_trials",
     "load_fixed_layer_hyperparameter_selections",
+    "load_fixed_layer_mlp1_hidden_selections",
+    "load_fixed_layer_mlp1_hidden_tuning_trials",
     "load_fixed_layer_tuning_trials",
     "load_fixed_layer_selectivity_report",
     "plot_fixed_layer_hyperparameter_tuning",
+    "plot_fixed_layer_mlp1_hidden_tuning",
     "plot_fixed_layer_das_epoch_tuning",
     "plot_fixed_layer_selectivity",
     "plot_fixed_layer_run_diagnostics",

@@ -24,6 +24,7 @@ from .config import (
     DASSelectivityConfig,
     FixedLayerModelConfig,
     FixedLayerSelectivityConfig,
+    MLP1SearchConfig,
 )
 from .datasets import (
     PreparedSelectivityData,
@@ -126,22 +127,15 @@ class FixedLayerSelectivityExperiment:
                     tables["pair_manifest"].extend(data.pair_manifest)
                     signature = self._tuning_signature(dataset_model, dataset_name)
                     checkpoint_path = (
-                        run_dir
-                        / "tuning_checkpoints"
-                        / model.name
-                        / f"{dataset_name}.json"
+                        run_dir / "tuning_checkpoints" / model.name / f"{dataset_name}.json"
                     )
                     if checkpoint_path.is_file():
                         checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
                         if checkpoint.get("signature") == signature:
                             selections[model.name][data.name] = checkpoint["selection"]
-                            tables["tuning_trials"].extend(
-                                checkpoint.get("tuning_trials", [])
-                            )
+                            tables["tuning_trials"].extend(checkpoint.get("tuning_trials", []))
                             runtime_rows.append(checkpoint["runtime"])
-                            self._persist_tuning_progress(
-                                store, tables, runtime_rows, selections
-                            )
+                            self._persist_tuning_progress(store, tables, runtime_rows, selections)
                             continue
                     activations = self._collect_activations(
                         dataset_model, adapter, data, run_dir, allow_cache_read=True
@@ -202,9 +196,7 @@ class FixedLayerSelectivityExperiment:
         self._persist_tuning_progress(store, tables, runtime_rows, selections)
         return run_dir
 
-    def _tuning_signature(
-        self, model: FixedLayerModelConfig, dataset_name: str
-    ) -> dict[str, Any]:
+    def _tuning_signature(self, model: FixedLayerModelConfig, dataset_name: str) -> dict[str, Any]:
         """Describe the scientific inputs that make a dataset tuning result reusable."""
 
         method_configs = {
@@ -444,9 +436,7 @@ class FixedLayerSelectivityExperiment:
                 del adapter
                 clear_device_cache(adapter_device)
         self._validate_selections(selections)
-        self._persist_das_epoch_tuning_progress(
-            store, trial_rows, runtime_rows, selections
-        )
+        self._persist_das_epoch_tuning_progress(store, trial_rows, runtime_rows, selections)
         return run_dir
 
     @staticmethod
@@ -459,6 +449,169 @@ class FixedLayerSelectivityExperiment:
         store.write_rows("das_epoch_tuning_trials.csv", trial_rows)
         store.write_rows("das_epoch_tuning_runtime.csv", runtime_rows)
         store.write_json("das_epoch_selected_hyperparameters.json", selections)
+
+    def tune_mlp1_hidden_sizes(
+        self,
+        learning_rate_selections: Mapping[str, Mapping[str, Mapping[str, Any]]],
+        hidden_sizes: Sequence[int],
+    ) -> Path:
+        """Tune MLP-1 width at each dataset's selected learning rate."""
+
+        if self.config.methods != ["mlp1"]:
+            raise ValueError("MLP-1 hidden-size tuning requires config.methods == ['mlp1']")
+        self._validate_selections(learning_rate_selections)
+        sizes = tuple(int(value) for value in hidden_sizes)
+        if not sizes or any(value < 1 for value in sizes):
+            raise ValueError("MLP-1 hidden sizes must be positive integers")
+        if len(set(sizes)) != len(sizes):
+            raise ValueError("MLP-1 hidden sizes must be unique")
+
+        run_dir = self._run_directory(require_run_id=True)
+        store = RunArtifactStore(run_dir)
+        store.write_json(
+            "mlp1_hidden_tuning_config.json",
+            {
+                "hidden_sizes": list(sizes),
+                "selection_metric": "validation_native_balanced_accuracy",
+            },
+        )
+        selections = json.loads(json.dumps(learning_rate_selections))
+        trial_rows: list[dict[str, Any]] = []
+        runtime_rows: list[dict[str, Any]] = []
+        models = tqdm(
+            self.config.models,
+            desc="MLP-1 hidden-size tuning models",
+            leave=True,
+            disable=not self.config.progress.enabled,
+            unit="model",
+        )
+        for model in models:
+            models.set_postfix(model=model.name)
+            adapter = CausalLMAdapter.from_pretrained(
+                model.hub_name,
+                resolve_device(model.device, model.dtype),
+                revision=model.revision,
+                prepend_bos=model.prepend_bos,
+            )
+            try:
+                for dataset_name in tqdm(
+                    self.config.data.datasets,
+                    desc=f"{model.name} MLP-1 hidden-size datasets",
+                    leave=self.config.progress.leave_completed,
+                    disable=not self.config.progress.enabled,
+                    unit="dataset",
+                ):
+                    dataset_model = self._validated_dataset_model(model, dataset_name, adapter)
+                    data = self._prepare_data(dataset_name, dataset_model, adapter)
+                    base_settings = dict(learning_rate_selections[model.name][data.name]["mlp1"])
+                    signature = {
+                        "schema_version": 1,
+                        "tuning": self._tuning_signature(dataset_model, dataset_name),
+                        "learning_rate_selection": base_settings,
+                        "hidden_sizes": list(sizes),
+                    }
+                    checkpoint_path = (
+                        run_dir
+                        / "mlp1_hidden_tuning_checkpoints"
+                        / model.name
+                        / f"{dataset_name}.json"
+                    )
+                    if checkpoint_path.is_file():
+                        checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+                        if checkpoint.get("signature") == signature:
+                            selections[model.name][data.name]["mlp1"] = checkpoint["selection"]
+                            trial_rows.extend(checkpoint.get("tuning_trials", []))
+                            runtime_rows.append(checkpoint["runtime"])
+                            self._persist_mlp1_hidden_tuning_progress(
+                                store, trial_rows, runtime_rows, selections
+                            )
+                            continue
+
+                    activations = self._collect_activations(
+                        dataset_model, adapter, data, run_dir, allow_cache_read=True
+                    )
+                    real_labels = {role: _labels(rows) for role, rows in data.examples.items()}
+                    search = MLP1SearchConfig(
+                        trials=[
+                            {
+                                "hidden_size": size,
+                                "learning_rate": float(base_settings["learning_rate"]),
+                                "weight_decay": float(base_settings["weight_decay"]),
+                            }
+                            for size in sizes
+                        ],
+                        dropout=float(base_settings["dropout"]),
+                        batch_size=int(base_settings["batch_size"]),
+                        max_epochs=int(base_settings["max_epochs"]),
+                        patience=int(base_settings["patience"]),
+                        min_delta=float(base_settings["min_delta"]),
+                        standardize_inputs=bool(base_settings["standardize_inputs"]),
+                    )
+                    selected = select_mlp1_probe(
+                        activations["train"],
+                        real_labels["train"],
+                        activations["validation"],
+                        real_labels["validation"],
+                        search=search,
+                        seed=self.config.seed,
+                        show_progress=self.config.progress.enabled,
+                        progress_description=(f"{model.name} {data.name} MLP-1 hidden-size tune"),
+                        progress_leave=self.config.progress.leave_completed,
+                    )
+                    first_trial_row = len(trial_rows)
+                    trial_rows.extend(
+                        {
+                            "model": model.name,
+                            "dataset": data.name,
+                            "layer": dataset_model.layer,
+                            "method": "mlp1",
+                            "task": "real",
+                            "seed": self.config.seed,
+                            **trial,
+                            "hyperparameters": json.dumps(trial["hyperparameters"], sort_keys=True),
+                        }
+                        for trial in selected.tuning_trials
+                    )
+                    selections[model.name][data.name]["mlp1"] = selected.hyperparameters
+                    runtime = {
+                        "phase": "mlp1_hidden_tuning",
+                        "model": model.name,
+                        "dataset": dataset_name,
+                        "layer": dataset_model.layer,
+                        **adapter.provenance(),
+                    }
+                    runtime_rows.append(runtime)
+                    checkpoint_store = RunArtifactStore(checkpoint_path.parent)
+                    checkpoint_store.write_json(
+                        checkpoint_path.name,
+                        {
+                            "signature": signature,
+                            "selection": selected.hyperparameters,
+                            "tuning_trials": trial_rows[first_trial_row:],
+                            "runtime": runtime,
+                        },
+                    )
+                    self._persist_mlp1_hidden_tuning_progress(
+                        store, trial_rows, runtime_rows, selections
+                    )
+            finally:
+                adapter_device = adapter.device_spec.device
+                del adapter
+                clear_device_cache(adapter_device)
+        self._validate_selections(selections)
+        self._persist_mlp1_hidden_tuning_progress(store, trial_rows, runtime_rows, selections)
+        return run_dir
+
+    @staticmethod
+    def _persist_mlp1_hidden_tuning_progress(
+        store: RunArtifactStore,
+        trial_rows: Sequence[Mapping[str, Any]],
+        runtime_rows: Sequence[Mapping[str, Any]],
+        selections: Mapping[str, Mapping[str, Mapping[str, Any]]],
+    ) -> None:
+        store.write_rows("mlp1_hidden_tuning_trials.csv", trial_rows)
+        store.write_rows("mlp1_hidden_tuning_runtime.csv", runtime_rows)
+        store.write_json("mlp1_hidden_selected_hyperparameters.json", selections)
 
     def _validated_dataset_model(
         self,
@@ -1389,6 +1542,18 @@ def tune_fixed_layer_das_epoch_budgets(
     )
 
 
+def tune_fixed_layer_mlp1_hidden_sizes(
+    config: FixedLayerSelectivityConfig,
+    learning_rate_selections: Mapping[str, Mapping[str, Mapping[str, Any]]],
+    hidden_sizes: Sequence[int],
+) -> Path:
+    """Tune MLP-1 hidden size at each dataset's selected learning rate."""
+
+    return FixedLayerSelectivityExperiment(config).tune_mlp1_hidden_sizes(
+        learning_rate_selections, hidden_sizes
+    )
+
+
 def run_fixed_layer_selectivity_with_frozen_hyperparameters(
     config: FixedLayerSelectivityConfig,
     selections: Mapping[str, Mapping[str, Mapping[str, Any]]] | None = None,
@@ -1403,5 +1568,6 @@ __all__ = [
     "run_fixed_layer_selectivity",
     "run_fixed_layer_selectivity_with_frozen_hyperparameters",
     "tune_fixed_layer_das_epoch_budgets",
+    "tune_fixed_layer_mlp1_hidden_sizes",
     "tune_fixed_layer_selectivity",
 ]

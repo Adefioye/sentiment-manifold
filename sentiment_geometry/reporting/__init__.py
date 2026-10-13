@@ -36,6 +36,7 @@ from .selectivity import (
     plot_fixed_layer_run_diagnostics,
     plot_fixed_layer_selectivity_accuracy_gaps,
     save_fixed_layer_selectivity_accuracy_tables,
+    save_fixed_layer_selectivity_balanced_accuracy_tables,
     selectivity_run_directories,
 )
 from .table1 import (
@@ -73,6 +74,7 @@ __all__ = [
     "plot_fixed_layer_run_diagnostics",
     "plot_fixed_layer_selectivity_accuracy_gaps",
     "save_fixed_layer_selectivity_accuracy_tables",
+    "save_fixed_layer_selectivity_balanced_accuracy_tables",
     "selectivity_run_directories",
     "select_table1_best_layers",
     "selected_layer_table",

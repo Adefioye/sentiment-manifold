@@ -13,6 +13,7 @@ from sentiment_geometry.reporting import (
     plot_fixed_layer_run_diagnostics,
     plot_fixed_layer_selectivity_accuracy_gaps,
     save_fixed_layer_selectivity_accuracy_tables,
+    save_fixed_layer_selectivity_balanced_accuracy_tables,
 )
 
 
@@ -190,7 +191,16 @@ def test_accuracy_selectivity_tables_and_hewitt_style_plots(tmp_path):
     assert native.loc[0, "balanced_accuracy_n_seeds"] == 2
 
     table_paths = save_fixed_layer_selectivity_accuracy_tables(tmp_path)
+    balanced_table_paths = save_fixed_layer_selectivity_balanced_accuracy_tables(tmp_path)
     figure_paths = plot_fixed_layer_selectivity_accuracy_gaps(tmp_path)
+    balanced_figure_paths = plot_fixed_layer_selectivity_accuracy_gaps(
+        tmp_path, use_balanced_accuracy=True
+    )
 
     assert all(path.is_file() and path.stat().st_size > 0 for path in table_paths)
+    assert all(path.is_file() and path.stat().st_size > 0 for path in balanced_table_paths)
     assert all(path.is_file() and path.stat().st_size > 0 for path in figure_paths)
+    assert all(path.is_file() and path.stat().st_size > 0 for path in balanced_figure_paths)
+    balanced_native = pd.read_csv(balanced_table_paths[0])
+    assert "balanced_accuracy_real_mean" in balanced_native
+    assert "accuracy_real_mean" not in balanced_native

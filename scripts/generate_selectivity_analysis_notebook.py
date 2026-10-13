@@ -54,9 +54,9 @@ def notebook() -> dict:
             ## 1. Settings
 
             Use the same Drive root and run ID as Notebooks 12–15. Held-out test accuracy is the
-            primary result. Set `USE_BALANCED_ACCURACY_FOR_PLOTS = True` for a class-imbalance
-            sensitivity plot; both ordinary and balanced accuracy are always retained in the
-            saved tables.
+            primary result. Leave `USE_BALANCED_ACCURACY_FOR_PLOTS = False` so the first plot pair
+            remains ordinary accuracy. A dedicated section below always produces the corresponding
+            balanced-accuracy tables and plots as a class-imbalance sensitivity analysis.
             """
         ),
         code(
@@ -121,6 +121,7 @@ def notebook() -> dict:
                 "combine_fixed_layer_selectivity_runs",
                 "plot_fixed_layer_selectivity_accuracy_gaps",
                 "save_fixed_layer_selectivity_accuracy_tables",
+                "save_fixed_layer_selectivity_balanced_accuracy_tables",
             }
             missing = sorted(name for name in required if not hasattr(reporting, name))
             if missing:
@@ -170,6 +171,7 @@ def notebook() -> dict:
                 build_fixed_layer_selectivity_accuracy_tables,
                 plot_fixed_layer_selectivity_accuracy_gaps,
                 save_fixed_layer_selectivity_accuracy_tables,
+                save_fixed_layer_selectivity_balanced_accuracy_tables,
             )
 
             NATIVE_TABLE, MIDPOINT_TABLE = build_fixed_layer_selectivity_accuracy_tables(
@@ -240,7 +242,74 @@ def notebook() -> dict:
         ),
         markdown(
             """
-            ## 7. Interpretation checklist
+            ## 7. Native-rule balanced-accuracy and selectivity table
+
+            This is the class-balanced counterpart of the native-rule table. Positive and negative
+            recall receive equal weight. It is displayed separately and saved as its own CSV.
+            """
+        ),
+        code(
+            """
+            BALANCED_TABLE_PATHS = save_fixed_layer_selectivity_balanced_accuracy_tables(
+                COMBINED_DIR,
+                split=ANALYSIS_SPLIT,
+            )
+            BALANCED_TABLE_COLUMNS = [
+                "model",
+                "dataset",
+                "layer",
+                "method_label",
+                "balanced_accuracy_real_mean",
+                "balanced_accuracy_real_std",
+                "balanced_accuracy_random_mean",
+                "balanced_accuracy_random_std",
+                "balanced_accuracy_selectivity_mean",
+                "balanced_accuracy_selectivity_ci95_low",
+                "balanced_accuracy_selectivity_ci95_high",
+                "balanced_accuracy_n_seeds",
+            ]
+            print("Native-rule balanced-accuracy table saved to:", BALANCED_TABLE_PATHS[0])
+            display(NATIVE_TABLE[BALANCED_TABLE_COLUMNS].round(4))
+            """
+        ),
+        markdown(
+            """
+            ## 8. Midpoint-rule balanced-accuracy and selectivity table
+
+            This applies the training-class midpoint threshold and then gives the positive and
+            negative classes equal weight in the reported accuracy.
+            """
+        ),
+        code(
+            """
+            print("Midpoint-rule balanced-accuracy table saved to:", BALANCED_TABLE_PATHS[1])
+            display(MIDPOINT_TABLE[BALANCED_TABLE_COLUMNS].round(4))
+            """
+        ),
+        markdown(
+            """
+            ## 9. Hewitt-style native and midpoint balanced-accuracy plots
+
+            These two additional plots use balanced accuracy on the y-axis. They are displayed
+            below the ordinary-accuracy plots and saved under distinct filenames, so neither plot
+            pair overwrites the other.
+            """
+        ),
+        code(
+            """
+            BALANCED_FIGURE_PATHS = plot_fixed_layer_selectivity_accuracy_gaps(
+                COMBINED_DIR,
+                split=ANALYSIS_SPLIT,
+                use_balanced_accuracy=True,
+            )
+            for figure_path in BALANCED_FIGURE_PATHS:
+                print(figure_path)
+                display(Image(filename=str(figure_path)))
+            """
+        ),
+        markdown(
+            """
+            ## 10. Interpretation checklist
 
             - Treat held-out test accuracy and selectivity as the primary comparison.
             - Confirm in Notebooks 12–15 that random-label training accuracy is high enough to

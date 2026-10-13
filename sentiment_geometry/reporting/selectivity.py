@@ -716,6 +716,40 @@ def save_fixed_layer_selectivity_accuracy_tables(
     return paths
 
 
+def save_fixed_layer_selectivity_balanced_accuracy_tables(
+    run_dir: str | Path,
+    *,
+    split: str = "test",
+) -> tuple[Path, Path]:
+    """Save balanced-accuracy-only native and midpoint selectivity tables."""
+
+    root = Path(run_dir)
+    output_dir = root / "analysis"
+    store = RunArtifactStore(output_dir)
+    native, midpoint = build_fixed_layer_selectivity_accuracy_tables(root, split=split)
+    identity_columns = [
+        "model",
+        "dataset",
+        "layer",
+        "method",
+        "method_label",
+        "split",
+        "decision_rule",
+    ]
+    balanced_columns = [column for column in native if column.startswith("balanced_accuracy_")]
+    tables = (
+        native[[*identity_columns, *balanced_columns]],
+        midpoint[[*identity_columns, *balanced_columns]],
+    )
+    paths = (
+        output_dir / f"native_{split}_balanced_accuracy_selectivity.csv",
+        output_dir / f"midpoint_{split}_balanced_accuracy_selectivity.csv",
+    )
+    for path, table in zip(paths, tables):
+        store.write_rows(path.name, table.to_dict(orient="records"))
+    return paths
+
+
 def plot_fixed_layer_selectivity_accuracy_gaps(
     run_dir: str | Path,
     *,
@@ -938,5 +972,6 @@ __all__ = [
     "plot_fixed_layer_run_diagnostics",
     "plot_fixed_layer_selectivity_accuracy_gaps",
     "save_fixed_layer_selectivity_accuracy_tables",
+    "save_fixed_layer_selectivity_balanced_accuracy_tables",
     "selectivity_run_directories",
 ]

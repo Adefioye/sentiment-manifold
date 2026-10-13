@@ -127,6 +127,7 @@ def test_selectivity_notebook_required_public_apis_are_importable():
             "plot_fixed_layer_run_diagnostics",
             "plot_fixed_layer_selectivity_accuracy_gaps",
             "save_fixed_layer_selectivity_accuracy_tables",
+            "save_fixed_layer_selectivity_balanced_accuracy_tables",
         },
     }
 
@@ -190,8 +191,12 @@ def test_cross_method_selectivity_analysis_notebook_is_read_only_and_complete():
     assert "build_fixed_layer_selectivity_accuracy_tables(" in source
     assert "save_fixed_layer_selectivity_accuracy_tables(" in source
     assert "plot_fixed_layer_selectivity_accuracy_gaps(" in source
+    assert "save_fixed_layer_selectivity_balanced_accuracy_tables(" in source
     assert "NATIVE_TABLE[TABLE_COLUMNS]" in source
     assert "MIDPOINT_TABLE[TABLE_COLUMNS]" in source
+    assert "NATIVE_TABLE[BALANCED_TABLE_COLUMNS]" in source
+    assert "MIDPOINT_TABLE[BALANCED_TABLE_COLUMNS]" in source
+    assert "use_balanced_accuracy=True" in source
     assert "Hugging Face token" in source
     assert "run_fixed_layer_selectivity" not in source
     assert "tune_fixed_layer_selectivity" not in source
